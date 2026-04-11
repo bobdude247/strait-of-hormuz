@@ -130,6 +130,51 @@ You are the allied naval commander orchestrating destroyers and support assets t
 - Prioritize target class (missile/drone/surface)
 - Trigger damage control on selected tanker
 
+## 10.1 Input Modalities (New Requirement)
+
+The game must support three control contexts from the prototype stage:
+
+1. **Keyboard-only (PC)**
+2. **Controller + keyboard hybrid (PC)**
+3. **Touchscreen (phone/tablet)**
+
+Design constraint: all three modalities must expose the same gameplay command set, even if UI presentation differs.
+
+## 10.2 Input UX Goals
+
+- No command should require mouse-only interaction.
+- Core actions (select, move, prioritize threat, activate damage control) must be reachable in <=2 interactions.
+- Touch UI must prioritize larger targets and low-precision gestures.
+- Controller navigation must support snapping between relevant entities and HUD widgets.
+
+## 10.3 Baseline Control Mapping
+
+### Keyboard-only
+
+- Group cycling: `Tab` / `Shift+Tab`
+- Unit selection shortcuts: number keys
+- Command mode: `Q` (move), `E` (escort posture), `R` (target priority), `F` (damage control)
+- Confirm/cancel: `Enter` / `Backspace`
+- Camera pan/zoom: `WASD` / `+ -`
+
+### Controller + Keyboard Hybrid
+
+- Left stick: camera pan
+- Right stick: selection cursor / focus shift
+- `A/Cross`: confirm/select
+- `B/Circle`: cancel/back
+- `X/Square` and `Y/Triangle`: cycle command categories
+- D-pad: quick target priority changes
+- Keyboard remains valid for advanced direct hotkeys
+
+### Touchscreen
+
+- Tap: select ship/group
+- Drag: set move waypoint
+- Long-press: open contextual radial command menu
+- Two-finger drag/pinch: camera pan/zoom
+- Dedicated bottom action bar for priority commands and damage control
+
 ## 11. Progression & Difficulty
 
 ## 11.1 Mission Difficulty Drivers
@@ -169,6 +214,12 @@ You are the allied naval commander orchestrating destroyers and support assets t
 - Clear threat telegraph lines for missile trajectories
 - Visible burning/smoke states on tankers
 - Distinct alert audio for missile lock, fire outbreak, and critical hull
+
+### Accessibility/Readability Notes
+
+- Minimum touch target size for mobile command buttons
+- High-contrast threat indicators for small displays
+- Optional icon+text labels for controller-focused navigation
 
 ## 15. Out of Scope (v0.1)
 

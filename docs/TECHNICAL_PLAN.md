@@ -28,6 +28,30 @@ Use a lightweight entity-component style with clear gameplay systems.
 
 ## 3. Prototype Systems Breakdown
 
+## 3.0 Input Abstraction System (New Requirement)
+
+Support three active input contexts from day one:
+
+1. Keyboard-only (PC)
+2. Controller + keyboard hybrid (PC)
+3. Touchscreen (phone/tablet)
+
+Implementation approach:
+
+- Use Unity Input System action maps with shared gameplay actions:
+  - `Select`
+  - `CycleSelection`
+  - `MoveCommand`
+  - `SetEscortPosture`
+  - `SetThreatPriority`
+  - `ActivateDamageControl`
+  - `CameraPan`
+  - `CameraZoom`
+- Bind each action to keyboard/gamepad/touch schemes.
+- Keep gameplay systems action-driven, never device-driven.
+
+Technical note: command handlers consume abstract actions/events so control schemes can be swapped without gameplay code changes.
+
 ## 3.1 World/Map System
 
 - Build a simplified strait map with:
@@ -113,6 +137,7 @@ Assets/
     Core/
       GameLoop.cs
       TimeService.cs
+      InputRouter.cs
     Simulation/
       UnitModel.cs
       MovementSystem.cs
@@ -130,6 +155,11 @@ Assets/
     UI/
       HudController.cs
       AlertFeed.cs
+      TouchCommandPanel.cs
+      GamepadFocusNavigator.cs
+    Input/
+      InputActions.inputactions
+      InputProfiles.cs
   Data/
     Ships/
     Threats/
@@ -143,6 +173,7 @@ Assets/
 - Unity project initialized
 - Folder structure created
 - Empty scene with camera + test ocean plane
+- Input System package enabled with keyboard/gamepad/touch control schemes
 
 ## Milestone 1 — Movement & Convoys (1–2 days)
 
@@ -168,6 +199,10 @@ Assets/
 - Win/loss checks
 - Score calculation
 - HUD indicators and alerts
+- Input-specific UI layer:
+  - Touch command panel + radial menu
+  - Gamepad focus navigation + button hints
+  - Keyboard-only hotkey discoverability overlay
 
 ## Milestone 5 — Balance Pass + Playtest (1 day)
 
@@ -181,6 +216,10 @@ Assets/
 - Tankers can burn, be suppressed, and sink if untreated
 - Mission has clear success/failure states
 - One full 10+ minute playable scenario runs without critical errors
+- Full playability confirmed in all three control contexts:
+  - Keyboard-only
+  - Controller + keyboard
+  - Touchscreen
 
 ## 8. Risks & Mitigations
 

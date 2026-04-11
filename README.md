@@ -31,6 +31,18 @@ Tankers can ignite when damaged. If a tanker burns too long, it sinks and blocks
 - Missile + drone attacks from shoreline zones
 - Fire escalation and sinking system for tankers
 - Score based on successful escorts, losses, and response efficiency
+- Multi-input support targets:
+  - Keyboard-only play on PC
+  - Gamepad + keyboard hybrid play on PC
+  - Touchscreen controls for phones/tablets
+
+## Input & Platform Accessibility (New Requirement)
+
+To keep gameplay consistent across devices, the prototype should use a unified command model with per-device input mappings:
+
+- **Keyboard-only (PC)**: full command coverage without mouse dependency
+- **Controller + keyboard (PC)**: gamepad for movement/selection + keyboard for advanced hotkeys
+- **Touch (mobile)**: tap/drag radial command UI with larger hit targets and simplified command layers
 
 ## Repository Setup
 

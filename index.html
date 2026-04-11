@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Strait of Hormuz Prototype</title>
+    <link rel="stylesheet" href="./src/styles.css" />
+  </head>
+  <body>
+    <div id="hud">
+      <div class="hud-group">
+        <strong>Strait of Hormuz — Prototype</strong>
+        <span id="timer">Time: 0</span>
+        <span id="score">Score: 0</span>
+      </div>
+      <div class="hud-group">
+        <span id="delivered">Delivered: 0</span>
+        <span id="lost">Lost: 0</span>
+        <span id="burning">Burning: 0</span>
+      </div>
+      <div id="status">Status: Running</div>
+    </div>
+
+    <canvas id="game" width="1280" height="720" aria-label="game canvas"></canvas>
+
+    <div id="controls">
+      <h3>Controls</h3>
+      <ul>
+        <li><strong>Keyboard:</strong> Arrow Keys/WASD move camera, Tab cycles escorts, F damage control, 1/2/3 threat priority.</li>
+        <li><strong>Controller:</strong> Left stick camera, A damage control, LB/RB cycle escorts.</li>
+        <li><strong>Touch:</strong> Drag map, tap escort to select, tap burning tanker to apply damage control.</li>
+      </ul>
+    </div>
+
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>
