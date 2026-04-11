@@ -204,6 +204,13 @@ const state = {
   ended: false
 };
 
+const navRules = {
+  tankerLaneAbsMax: 30,
+  tankerSeparation: 22,
+  collisionRange: 6.5,
+  groundingPenalty: 14
+};
+
 const cargoTypes = [
   { name: "Crude Oil", fireRisk: 1.0, value: 100 },
   { name: "LPG", fireRisk: 1.3, value: 140 },
@@ -552,6 +559,7 @@ function update(dt) {
   updateProjectiles(dt);
   updateTollGates(dt);
   updateAlliedPickups(dt);
+  checkCollisionsAndGrounding(dt);
 
   if (state.time >= state.duration) {
     state.ended = true;
@@ -621,8 +629,13 @@ function updateEscorts(dt) {
     }
 
     const c = clampToCorridor({ x: e.x, y: e.y }, 5);
+    const distFromSafe = nearestOnRoute({ x: e.x, y: e.y }).dist;
     e.x = c.x;
     e.y = c.y;
+
+    if (distFromSafe > corridorHalfWidth * 0.9) {
+      e.hp = Math.max(20, e.hp - navRules.groundingPenalty * dt);
+    }
     const vx = e.x - prev.x;
     const vy = e.y - prev.y;
     const l = Math.hypot(vx, vy);
@@ -630,6 +643,57 @@ function updateEscorts(dt) {
 
     e.samReload -= dt;
     e.ciwsReload -= dt;
+  }
+}
+
+function applyTankerSeparation() {
+  const tankers = state.ships.filter((s) => s.kind === "tanker" && !s.sunk && !s.staged);
+  for (let i = 0; i < tankers.length; i++) {
+    for (let j = i + 1; j < tankers.length; j++) {
+      const a = tankers[i];
+      const b = tankers[j];
+      const d = Math.hypot(a.x - b.x, a.y - b.y);
+      if (d < navRules.tankerSeparation) {
+        const steer = (navRules.tankerSeparation - d) * 0.35;
+        a.targetLaneOffset = Math.max(-navRules.tankerLaneAbsMax, Math.min(navRules.tankerLaneAbsMax, a.targetLaneOffset - steer));
+        b.targetLaneOffset = Math.max(-navRules.tankerLaneAbsMax, Math.min(navRules.tankerLaneAbsMax, b.targetLaneOffset + steer));
+        a.speed *= 0.985;
+        b.speed *= 0.985;
+      }
+    }
+  }
+}
+
+function checkCollisionsAndGrounding(dt) {
+  const active = state.ships.filter((s) => !s.sunk);
+
+  for (let i = 0; i < active.length; i++) {
+    for (let j = i + 1; j < active.length; j++) {
+      const a = active[i];
+      const b = active[j];
+      const d = Math.hypot(a.x - b.x, a.y - b.y);
+      if (d < navRules.collisionRange + a.radius * 0.25 + b.radius * 0.25) {
+        if (a.kind === "tanker") a.hp -= 8 * dt;
+        if (b.kind === "tanker") b.hp -= 8 * dt;
+        if (a.kind === "escort") a.hp -= 3 * dt;
+        if (b.kind === "escort") b.hp -= 3 * dt;
+        state.message = "Status: Collision risk! Maintain separation";
+        state.messageTimer = 0.8;
+      }
+    }
+  }
+
+  for (const s of active) {
+    const n = nearestOnRoute({ x: s.x, y: s.y });
+    if (n.dist > corridorHalfWidth + 3) {
+      if (s.kind === "tanker") {
+        s.hp -= navRules.groundingPenalty * dt;
+        if (!s.burning && Math.random() < 0.03) {
+          s.burning = true;
+          s.burn = Math.max(0.25, s.burn);
+        }
+      }
+    }
   }
 }
 
@@ -646,6 +710,7 @@ function updateTankers(dt) {
       }
     }
 
+    t.targetLaneOffset = Math.max(-navRules.tankerLaneAbsMax, Math.min(navRules.tankerLaneAbsMax, t.targetLaneOffset));
     t.laneOffset += (t.targetLaneOffset - t.laneOffset) * dt * 2;
     const moveBoost = t.boostTimer > 0 ? 1.34 : 1;
     t.boostTimer = Math.max(0, t.boostTimer - dt);
@@ -678,6 +743,8 @@ function updateTankers(dt) {
     t.y = p.y + p.normal.y * t.laneOffset;
     t.heading = t.direction === 1 ? { ...p.tangent } : { x: -p.tangent.x, y: -p.tangent.y };
   }
+
+  applyTankerSeparation();
 }
 
 function updateThreats(dt) {
