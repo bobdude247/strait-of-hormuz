@@ -213,11 +213,13 @@ const cargoTypes = [
   { name: "Containers", fireRisk: 0.5, value: 110 }
 ];
 
-// Smaller map-relative silhouettes
-const tankerSizes = [
-  { key: "small", hp: 100, speed: 76, radius: 6 },
-  { key: "medium", hp: 160, speed: 67, radius: 8 },
-  { key: "large", hp: 235, speed: 58, radius: 11 }
+// Role/class-based ship set for visual + gameplay differentiation
+const shipClasses = [
+  { key: "Aframax", hp: 120, speed: 74, radius: 6.5, lengthMul: 2.1 },
+  { key: "Suezmax", hp: 170, speed: 66, radius: 8.2, lengthMul: 2.35 },
+  { key: "VLCC", hp: 245, speed: 56, radius: 10.8, lengthMul: 2.7 },
+  { key: "Container", hp: 150, speed: 68, radius: 7.8, lengthMul: 2.25 },
+  { key: "LNG", hp: 165, speed: 64, radius: 8.4, lengthMul: 2.3 }
 ];
 
 function rng(min, max) {
@@ -311,7 +313,7 @@ function spawnEscort(i, routeT = null) {
 }
 
 function spawnTanker(direction = Math.random() < 0.5 ? 1 : -1) {
-  const size = pick(tankerSizes);
+  const shipClass = pick(shipClasses);
   const cargo = pick(cargoTypes);
   const full = Math.random() < (direction === 1 ? 0.72 : 0.38);
   const stageFirst = Math.random() < 0.45;
@@ -330,7 +332,7 @@ function spawnTanker(direction = Math.random() < 0.5 ? 1 : -1) {
 
   state.ships.push({
     kind: "tanker",
-    size: size.key,
+    shipClass: shipClass.key,
     cargo: cargo.name,
     cargoValue: full ? cargo.value : Math.round(cargo.value * 0.25),
     fireRisk: full ? cargo.fireRisk : Math.max(0.2, cargo.fireRisk * 0.45),
@@ -339,12 +341,13 @@ function spawnTanker(direction = Math.random() < 0.5 ? 1 : -1) {
     routeT: t0,
     laneOffset,
     targetLaneOffset: laneOffset,
-    speed: full ? size.speed * 0.92 : size.speed * 1.08,
+    speed: full ? shipClass.speed * 0.92 : shipClass.speed * 1.08,
     boostTimer: 0,
     heading: direction === 1 ? { ...base.tangent } : { x: -base.tangent.x, y: -base.tangent.y },
-    hp: size.hp,
-    maxHp: size.hp,
-    radius: size.radius,
+    hp: shipClass.hp,
+    maxHp: shipClass.hp,
+    radius: shipClass.radius,
+    lengthMul: shipClass.lengthMul,
     x: stageFirst ? anchor.x + rng(-anchorRad, anchorRad) : base.x + base.normal.x * laneOffset,
     y: stageFirst ? anchor.y + rng(-anchorRad, anchorRad) : base.y + base.normal.y * laneOffset,
     staged: stageFirst,
@@ -1001,7 +1004,14 @@ function drawStar(cx, cy, spikes, outerR, innerR) {
 }
 
 function drawEscort(e) {
-  drawShipSprite(e.x, e.y, e.heading, e.radius * 1.9, "#8ed6ff", "#1d2a38");
+  drawShipSprite(e.x, e.y, e.heading, {
+    scale: e.radius * 2.0,
+    lengthMul: 1.9,
+    hullColor: "#8ed6ff",
+    outlineColor: "#1d2a38",
+    deckColor: "rgba(255,255,255,0.38)",
+    style: "destroyer"
+  });
 
   if (state.escorts[state.selectedEscort] === e) {
     ctx.strokeStyle = "#f5ff6a";
@@ -1030,7 +1040,23 @@ function drawTanker(t) {
     Urea: "#def2be",
     Containers: "#c9d0d8"
   };
-  drawShipSprite(t.x, t.y, t.heading, t.radius * 2.2, colors[t.cargo] || "#d6d6d6", "#2f2d2a");
+  const classStyles = {
+    VLCC: { lengthMul: 2.95, deck: "rgba(245,225,190,0.42)", style: "vlcc" },
+    Suezmax: { lengthMul: 2.6, deck: "rgba(240,230,205,0.40)", style: "suezmax" },
+    Aframax: { lengthMul: 2.35, deck: "rgba(240,230,205,0.36)", style: "aframax" },
+    Container: { lengthMul: 2.4, deck: "rgba(170,210,250,0.33)", style: "container" },
+    LNG: { lengthMul: 2.5, deck: "rgba(210,240,255,0.37)", style: "lng" }
+  };
+  const c = classStyles[t.shipClass] || classStyles.Suezmax;
+
+  drawShipSprite(t.x, t.y, t.heading, {
+    scale: t.radius * 2.0,
+    lengthMul: t.lengthMul || c.lengthMul,
+    hullColor: colors[t.cargo] || "#d6d6d6",
+    outlineColor: "#2f2d2a",
+    deckColor: c.deck,
+    style: c.style
+  });
 
   if (state.selectedTanker === t) {
     ctx.strokeStyle = "#ffe66a";
@@ -1047,7 +1073,7 @@ function drawTanker(t) {
 
   ctx.fillStyle = t.loadState === "FULL" ? "#ffd88e" : "#d7e6f2";
   ctx.font = "9px Segoe UI";
-  ctx.fillText(t.loadState, t.x - t.radius, t.y - t.radius - 4);
+  ctx.fillText(`${t.loadState} ${t.shipClass}`, t.x - t.radius * 1.35, t.y - t.radius - 4);
 
   if (t.burning) {
     ctx.fillStyle = "rgba(255,130,64,0.92)";
@@ -1057,7 +1083,28 @@ function drawTanker(t) {
   }
 }
 
-function drawShipSprite(x, y, heading, scale, hullColor, outlineColor) {
+function drawWakeTrail(x, y, heading, length, width, alpha = 0.18) {
+  const backX = -heading.x;
+  const backY = -heading.y;
+  const nx = -backY;
+  const ny = backX;
+
+  ctx.fillStyle = `rgba(220,245,255,${alpha})`;
+  ctx.beginPath();
+  ctx.moveTo(x + nx * width, y + ny * width);
+  ctx.lineTo(x - nx * width, y - ny * width);
+  ctx.lineTo(x + backX * length - nx * (width * 0.25), y + backY * length - ny * (width * 0.25));
+  ctx.lineTo(x + backX * length + nx * (width * 0.25), y + backY * length + ny * (width * 0.25));
+  ctx.closePath();
+  ctx.fill();
+}
+
+function drawShipSprite(x, y, heading, spec) {
+  const { scale, lengthMul, hullColor, outlineColor, deckColor, style } = spec;
+  const lod = state.zoom;
+
+  drawWakeTrail(x - heading.x * scale * 0.9, y - heading.y * scale * 0.9, heading, scale * (2.8 + lengthMul * 0.5), scale * 0.5, 0.14);
+
   const a = Math.atan2(heading.y, heading.x);
   ctx.save();
   ctx.translate(x, y);
@@ -1067,19 +1114,50 @@ function drawShipSprite(x, y, heading, scale, hullColor, outlineColor) {
   ctx.strokeStyle = outlineColor;
   ctx.lineWidth = 1;
 
+  const nose = scale * 1.0;
+  const mid = scale * 0.35;
+  const stern = -scale * lengthMul;
+  const beam = scale * 0.38;
+
   ctx.beginPath();
-  ctx.moveTo(scale * 1.1, 0);
-  ctx.lineTo(scale * 0.35, -scale * 0.45);
-  ctx.lineTo(-scale * 1.0, -scale * 0.30);
-  ctx.lineTo(-scale * 1.15, 0);
-  ctx.lineTo(-scale * 1.0, scale * 0.30);
-  ctx.lineTo(scale * 0.35, scale * 0.45);
+  ctx.moveTo(nose, 0);
+  ctx.lineTo(mid, -beam);
+  ctx.lineTo(stern * 0.35, -beam * 0.88);
+  ctx.lineTo(stern, -beam * 0.32);
+  ctx.lineTo(stern - scale * 0.12, 0);
+  ctx.lineTo(stern, beam * 0.32);
+  ctx.lineTo(stern * 0.35, beam * 0.88);
+  ctx.lineTo(mid, beam);
   ctx.closePath();
   ctx.fill();
   ctx.stroke();
 
-  ctx.fillStyle = "rgba(255,255,255,0.35)";
-  ctx.fillRect(-scale * 0.2, -scale * 0.12, scale * 0.55, scale * 0.24);
+  if (lod > 0.95) {
+    ctx.fillStyle = deckColor;
+    ctx.fillRect(stern * 0.55, -beam * 0.48, Math.abs(stern) * 0.95, beam * 0.96);
+
+    if (style === "container") {
+      ctx.fillStyle = "rgba(210,80,80,0.40)";
+      for (let i = 0; i < 4; i++) {
+        ctx.fillRect(stern * 0.5 + i * scale * 0.35, -beam * 0.22, scale * 0.28, beam * 0.44);
+      }
+    }
+
+    if (style === "destroyer") {
+      ctx.fillStyle = "rgba(240,250,255,0.45)";
+      ctx.fillRect(stern * 0.28, -beam * 0.18, scale * 0.55, beam * 0.36);
+      ctx.fillRect(stern * 0.02, -beam * 0.14, scale * 0.25, beam * 0.28);
+    }
+
+    if (style === "vlcc" || style === "suezmax" || style === "aframax") {
+      ctx.fillStyle = "rgba(80,80,80,0.24)";
+      ctx.fillRect(stern * 0.45, -beam * 0.08, Math.abs(stern) * 0.7, beam * 0.16);
+    }
+  } else {
+    // Low zoom fallback silhouette
+    ctx.fillStyle = "rgba(255,255,255,0.28)";
+    ctx.fillRect(stern * 0.2, -beam * 0.2, scale * 0.4, beam * 0.4);
+  }
 
   ctx.restore();
 }
@@ -1132,7 +1210,7 @@ function drawLabels() {
     ctx.fillStyle = "rgba(10,20,32,0.75)";
     ctx.fillRect(state.camera.x + 370, state.camera.y + 66, 340, 72);
     ctx.fillStyle = "#f3fbff";
-    ctx.fillText(`Tanker: ${t.cargo} (${t.loadState})`, state.camera.x + 380, state.camera.y + 88);
+    ctx.fillText(`Tanker: ${t.shipClass} ${t.cargo} (${t.loadState})`, state.camera.x + 380, state.camera.y + 88);
     ctx.fillText(`Route: ${t.direction === 1 ? "Kharg → Sea" : "Sea → Kharg"}`, state.camera.x + 380, state.camera.y + 109);
     ctx.fillText("Tap water or U/O to shift lane within corridor", state.camera.x + 380, state.camera.y + 128);
   }
