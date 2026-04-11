@@ -56,3 +56,22 @@ git remote add origin git@github.com:bobdude247/strait-of-hormuz.git
 
 - `docs/GDD.md` for design detail
 - `docs/TECHNICAL_PLAN.md` for implementation plan
+
+## GitHub Pages Hosting
+
+This repo includes an automated GitHub Pages workflow at `.github/workflows/deploy-pages.yml`.
+
+### One-time GitHub setup
+
+1. Open repository **Settings** → **Pages**.
+2. Under **Build and deployment**, set **Source** to **GitHub Actions**.
+3. Save.
+
+### Deploy flow
+
+- Every push to `main` runs the Pages deploy workflow.
+- The site publishes from repository root (this includes `index.html` and `src/*`).
+
+### Expected URL
+
+- `https://bobdude247.github.io/strait-of-hormuz/`
