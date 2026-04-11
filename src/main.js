@@ -45,20 +45,26 @@ function lonLatToWorld(lon, lat) {
   };
 }
 
-// Long navigable shipping trunk: Kharg approaches -> Strait -> Gulf of Oman exit
+// Long navigable shipping trunk aligned to deep-water centerline from Gulf -> Strait -> Oman Sea
 const trunkRouteLonLat = [
-  [50.20, 29.25],
-  [51.10, 29.00],
-  [52.30, 28.55],
-  [53.35, 28.05],
-  [54.30, 27.45],
-  [55.10, 26.95],
-  [55.70, 26.55],
-  [56.30, 26.35],
-  [56.95, 26.22],
-  [57.60, 26.04],
-  [58.25, 25.55],
-  [58.85, 24.95]
+  [50.60, 28.95],
+  [51.20, 28.70],
+  [52.00, 28.30],
+  [52.85, 27.90],
+  [53.70, 27.50],
+  [54.45, 27.10],
+  [55.10, 26.78],
+  [55.55, 26.50],
+  [55.95, 26.24],
+  [56.25, 26.12],
+  [56.50, 26.20],
+  [56.67, 26.34],
+  [56.76, 26.10],
+  [56.88, 25.82],
+  [57.18, 25.57],
+  [57.60, 25.30],
+  [58.15, 24.98],
+  [58.85, 24.62]
 ];
 const routePoints = trunkRouteLonLat.map(([lon, lat]) => lonLatToWorld(lon, lat));
 
@@ -135,7 +141,7 @@ function nearestOnRoute(point) {
 }
 
 // Water-rule proxy: ships are constrained to this navigable corridor around route centerline.
-const corridorHalfWidth = 46;
+const corridorHalfWidth = 28;
 function clampToCorridor(point, margin = 6) {
   const n = nearestOnRoute(point);
   const maxOffset = corridorHalfWidth - margin;
@@ -158,6 +164,7 @@ function getTile(z, x, y) {
 
 const state = {
   camera: { x: 0, y: 0, speed: 760 },
+  zoom: 1,
   keys: new Set(),
   pointer: { down: false, moved: false, lx: 0, ly: 0 },
   gamepad: { prevButtons: [] },
@@ -380,6 +387,8 @@ function bindInput() {
 
     if (k === "f") useDamageControl();
     if (["1", "2", "3"].includes(e.key)) state.priority = e.key === "1" ? "missile" : e.key === "2" ? "drone" : "any";
+    if (e.key === "+" || e.key === "=") state.zoom = Math.min(2.2, state.zoom + 0.1);
+    if (e.key === "-") state.zoom = Math.max(0.6, state.zoom - 0.1);
     if (e.key === "7") spendUpgrade("fleet");
     if (e.key === "8") spendUpgrade("weapon");
     if (e.key === "9") spendUpgrade("damage");
@@ -407,18 +416,37 @@ function bindInput() {
     state.pointer.lx = e.clientX;
     state.pointer.ly = e.clientY;
     if (Math.abs(dx) + Math.abs(dy) > 3) state.pointer.moved = true;
-    state.camera.x -= dx;
-    state.camera.y -= dy;
+    state.camera.x -= dx / state.zoom;
+    state.camera.y -= dy / state.zoom;
   });
 
   canvas.addEventListener("pointerup", (e) => {
     if (!state.pointer.moved) handleTap(e.clientX, e.clientY);
     state.pointer.down = false;
   });
+
+  canvas.addEventListener(
+    "wheel",
+    (e) => {
+      e.preventDefault();
+      const rect = canvas.getBoundingClientRect();
+      const sx = e.clientX - rect.left;
+      const sy = e.clientY - rect.top;
+      const before = screenToWorld(sx, sy);
+
+      const step = e.deltaY > 0 ? -0.08 : 0.08;
+      state.zoom = Math.max(0.6, Math.min(2.2, state.zoom + step));
+
+      const after = screenToWorld(sx, sy);
+      state.camera.x += before.x - after.x;
+      state.camera.y += before.y - after.y;
+    },
+    { passive: false }
+  );
 }
 
 function screenToWorld(screenX, screenY) {
-  return { x: screenX + state.camera.x, y: screenY + state.camera.y - 54 };
+  return { x: state.camera.x + screenX / state.zoom, y: state.camera.y + (screenY - 54) / state.zoom };
 }
 
 function handleTap(screenX, screenY) {
@@ -525,8 +553,10 @@ function updateCamera(dt) {
 
   handleGamepad(dt);
 
-  const maxX = Math.max(0, WORLD.width - canvas.width);
-  const maxY = Math.max(0, WORLD.height - (canvas.height - 54));
+  const viewW = canvas.width / state.zoom;
+  const viewH = (canvas.height - 54) / state.zoom;
+  const maxX = Math.max(0, WORLD.width - viewW);
+  const maxY = Math.max(0, WORLD.height - viewH);
   state.camera.x = Math.max(-100, Math.min(maxX + 100, state.camera.x));
   state.camera.y = Math.max(-100, Math.min(maxY + 120, state.camera.y));
 }
@@ -803,7 +833,9 @@ function handleGamepad(dt) {
 function draw() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.save();
-  ctx.translate(-state.camera.x, -state.camera.y + 54);
+  ctx.translate(0, 54);
+  ctx.scale(state.zoom, state.zoom);
+  ctx.translate(-state.camera.x, -state.camera.y);
 
   drawMapTiles();
   drawSeaCorridor();
@@ -830,6 +862,8 @@ function draw() {
 
 function drawMapTiles() {
   const scale = 2 ** TILE_Z;
+  const viewW = canvas.width / state.zoom;
+  const viewH = (canvas.height - 54) / state.zoom;
   const xMin = Math.floor(projBounds.minX * scale);
   const yMin = Math.floor(projBounds.minY * scale);
   const xMax = Math.ceil(projBounds.maxX * scale);
@@ -845,8 +879,8 @@ function drawMapTiles() {
       const ww = (1 / scale / (projBounds.maxX - projBounds.minX)) * WORLD.width;
       const wh = (1 / scale / (projBounds.maxY - projBounds.minY)) * WORLD.height;
 
-      if (wx + ww < state.camera.x - 30 || wx > state.camera.x + canvas.width + 30) continue;
-      if (wy + wh < state.camera.y - 80 || wy > state.camera.y + canvas.height + 80) continue;
+      if (wx + ww < state.camera.x - 30 || wx > state.camera.x + viewW + 30) continue;
+      if (wy + wh < state.camera.y - 80 || wy > state.camera.y + viewH + 80) continue;
 
       if (rec.loaded) ctx.drawImage(rec.img, wx, wy, ww, wh);
       else {
