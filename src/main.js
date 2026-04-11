@@ -176,6 +176,13 @@ const state = {
   tollGates: [],
   alliedPickups: [],
   alliedShieldCharges: 0,
+  upgradePoints: 0,
+  nextPowerDelivery: 3,
+  upgrades: {
+    weaponTier: 1,
+    damageControlTier: 1,
+    fleetTier: 1
+  },
   spawn: { tankerAt: 1.2, threatAt: 2.5, alliedAt: 16 },
   message: "Status: Running",
   messageTimer: 0,
@@ -206,6 +213,48 @@ function pick(arr) {
   return arr[(Math.random() * arr.length) | 0];
 }
 
+function grantDeliveryPowerProgress() {
+  if (state.delivered >= state.nextPowerDelivery) {
+    state.upgradePoints += 1;
+    state.nextPowerDelivery += 3;
+    state.message = `Status: Power-up point earned (${state.upgradePoints})`;
+    state.messageTimer = 2.2;
+  }
+}
+
+function spendUpgrade(type) {
+  if (state.upgradePoints <= 0) return;
+
+  if (type === "fleet") {
+    if (state.escorts.length >= 7) return;
+    const lead = state.ships.find((s) => s.kind === "tanker" && !s.sunk);
+    const routeT = lead ? lead.routeT : 0.12;
+    spawnEscort(state.escorts.length, routeT);
+    state.upgrades.fleetTier += 1;
+    state.upgradePoints -= 1;
+    state.message = "Status: Fleet power-up: +1 escort deployed";
+    state.messageTimer = 2;
+    return;
+  }
+
+  if (type === "weapon") {
+    if (state.upgrades.weaponTier >= 4) return;
+    state.upgrades.weaponTier += 1;
+    state.upgradePoints -= 1;
+    state.message = `Status: Weapons upgraded to Tier ${state.upgrades.weaponTier}`;
+    state.messageTimer = 2;
+    return;
+  }
+
+  if (type === "damage") {
+    if (state.upgrades.damageControlTier >= 4) return;
+    state.upgrades.damageControlTier += 1;
+    state.upgradePoints -= 1;
+    state.message = `Status: Damage Control upgraded to Tier ${state.upgrades.damageControlTier}`;
+    state.messageTimer = 2;
+  }
+}
+
 function init() {
   for (let i = 0; i < 3; i++) spawnEscort(i);
   for (let i = 0; i < 9; i++) spawnTanker(i % 2 === 0 ? 1 : -1);
@@ -223,8 +272,8 @@ function init() {
   requestAnimationFrame(loop);
 }
 
-function spawnEscort(i) {
-  const base = sampleRoute(0.08 + i * 0.015);
+function spawnEscort(i, routeT = null) {
+  const base = sampleRoute(routeT ?? (0.08 + i * 0.015));
   const e = {
     kind: "escort",
     x: base.x + base.normal.x * (18 + i * 14),
@@ -331,6 +380,9 @@ function bindInput() {
 
     if (k === "f") useDamageControl();
     if (["1", "2", "3"].includes(e.key)) state.priority = e.key === "1" ? "missile" : e.key === "2" ? "drone" : "any";
+    if (e.key === "7") spendUpgrade("fleet");
+    if (e.key === "8") spendUpgrade("weapon");
+    if (e.key === "9") spendUpgrade("damage");
 
     const t = state.selectedTanker;
     if (t && !t.sunk) {
@@ -415,7 +467,8 @@ function useDamageControl(forced = null) {
   if (!t) return;
   if (Math.hypot(t.x - escort.x, t.y - escort.y) > 240) return;
 
-  t.burn = Math.max(0, t.burn - 1.35);
+  const dcStrength = 1.35 + (state.upgrades.damageControlTier - 1) * 0.45;
+  t.burn = Math.max(0, t.burn - dcStrength);
   if (t.burn <= 0.12) t.burning = false;
   state.score += 8;
 }
@@ -553,6 +606,7 @@ function updateTankers(dt) {
       t.sunk = true;
       state.delivered += 1;
       state.score += 45 + t.cargoValue;
+      grantDeliveryPowerProgress();
       if (state.selectedTanker === t) state.selectedTanker = null;
       continue;
     }
@@ -603,6 +657,12 @@ function updateThreats(dt) {
 }
 
 function updateWeapons() {
+  const weaponTier = state.upgrades.weaponTier;
+  const samDamage = 24 + (weaponTier - 1) * 4;
+  const ciwsDamage = 10 + (weaponTier - 1) * 2;
+  const samReloadBase = 0.9 * (1 - (weaponTier - 1) * 0.12);
+  const ciwsReloadBase = 0.11 * (1 - (weaponTier - 1) * 0.10);
+
   for (const e of state.escorts) {
     let targets = state.threats.filter((t) => Math.hypot(t.x - e.x, t.y - e.y) < 460);
     if (!targets.length) continue;
@@ -616,12 +676,12 @@ function updateWeapons() {
     const d = Math.hypot(t.x - e.x, t.y - e.y);
 
     if (d < 460 && e.samReload <= 0) {
-      fireProjectile(e.x, e.y, t, 470, 24, "sam");
-      e.samReload = 0.9;
+      fireProjectile(e.x, e.y, t, 470, samDamage, "sam");
+      e.samReload = Math.max(0.35, samReloadBase);
     }
     if (d < 150 && e.ciwsReload <= 0) {
-      fireProjectile(e.x, e.y, t, 660, 10, "ciws");
-      e.ciwsReload = 0.11;
+      fireProjectile(e.x, e.y, t, 660, ciwsDamage, "ciws");
+      e.ciwsReload = Math.max(0.05, ciwsReloadBase);
     }
   }
 }
@@ -985,7 +1045,11 @@ function drawLabels() {
       state.camera.x + 20,
       state.camera.y + 109
     );
-    ctx.fillText("Drag map or Shift+WASD for fast theater scroll", state.camera.x + 20, state.camera.y + 128);
+    ctx.fillText(
+      `Upgrades: Pts ${state.upgradePoints} | Fleet T${state.upgrades.fleetTier} | Wpn T${state.upgrades.weaponTier} | DC T${state.upgrades.damageControlTier}`,
+      state.camera.x + 20,
+      state.camera.y + 128
+    );
   }
 
   if (state.selectedTanker && !state.selectedTanker.sunk) {
