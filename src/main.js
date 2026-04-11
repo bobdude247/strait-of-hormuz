@@ -141,7 +141,15 @@ function nearestOnRoute(point) {
 }
 
 // Water-rule proxy: ships are constrained to this navigable corridor around route centerline.
-const corridorHalfWidth = 28;
+const corridorHalfWidth = 22;
+
+const ANCHOR_ZONES = {
+  west: { lon: 55.35, lat: 25.92, radius: 42, entryT: 0.60 },
+  east: { lon: 57.30, lat: 25.18, radius: 40, entryT: 0.86 }
+};
+
+const anchorWest = lonLatToWorld(ANCHOR_ZONES.west.lon, ANCHOR_ZONES.west.lat);
+const anchorEast = lonLatToWorld(ANCHOR_ZONES.east.lon, ANCHOR_ZONES.east.lat);
 function clampToCorridor(point, margin = 6) {
   const n = nearestOnRoute(point);
   const maxOffset = corridorHalfWidth - margin;
@@ -306,9 +314,19 @@ function spawnTanker(direction = Math.random() < 0.5 ? 1 : -1) {
   const size = pick(tankerSizes);
   const cargo = pick(cargoTypes);
   const full = Math.random() < (direction === 1 ? 0.72 : 0.38);
-  const t0 = direction === 1 ? rng(0, 0.04) : rng(0.96, 1);
+  const stageFirst = Math.random() < 0.45;
+  const t0 = stageFirst
+    ? direction === 1
+      ? ANCHOR_ZONES.west.entryT + rng(-0.015, 0.015)
+      : ANCHOR_ZONES.east.entryT + rng(-0.015, 0.015)
+    : direction === 1
+      ? rng(0, 0.04)
+      : rng(0.96, 1);
   const laneOffset = rng(-28, 28);
   const base = sampleRoute(t0);
+
+  const anchor = direction === 1 ? anchorWest : anchorEast;
+  const anchorRad = direction === 1 ? ANCHOR_ZONES.west.radius : ANCHOR_ZONES.east.radius;
 
   state.ships.push({
     kind: "tanker",
@@ -327,8 +345,10 @@ function spawnTanker(direction = Math.random() < 0.5 ? 1 : -1) {
     hp: size.hp,
     maxHp: size.hp,
     radius: size.radius,
-    x: base.x + base.normal.x * laneOffset,
-    y: base.y + base.normal.y * laneOffset,
+    x: stageFirst ? anchor.x + rng(-anchorRad, anchorRad) : base.x + base.normal.x * laneOffset,
+    y: stageFirst ? anchor.y + rng(-anchorRad, anchorRad) : base.y + base.normal.y * laneOffset,
+    staged: stageFirst,
+    stageTimer: stageFirst ? rng(9, 20) : 0,
     burning: false,
     burn: 0,
     sunk: false
@@ -613,6 +633,15 @@ function updateEscorts(dt) {
 function updateTankers(dt) {
   for (const t of state.ships) {
     if (t.kind !== "tanker" || t.sunk) continue;
+
+    if (t.staged) {
+      t.stageTimer -= dt;
+      if (t.stageTimer <= 0) {
+        t.staged = false;
+      } else {
+        continue;
+      }
+    }
 
     t.laneOffset += (t.targetLaneOffset - t.laneOffset) * dt * 2;
     const moveBoost = t.boostTimer > 0 ? 1.34 : 1;
@@ -916,6 +945,18 @@ function drawSeaCorridor() {
     ctx.arc(p.x, p.y - 130, corridorHalfWidth + 95, 0, Math.PI * 2);
     ctx.fill();
   }
+
+  // visual anchor queues (stranded tanker groups)
+  ctx.strokeStyle = "rgba(255, 168, 80, 0.75)";
+  ctx.lineWidth = 2;
+  ctx.setLineDash([6, 4]);
+  ctx.beginPath();
+  ctx.arc(anchorWest.x, anchorWest.y, ANCHOR_ZONES.west.radius, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(anchorEast.x, anchorEast.y, ANCHOR_ZONES.east.radius, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.setLineDash([]);
 }
 
 function drawTollGates() {
