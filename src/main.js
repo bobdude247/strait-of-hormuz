@@ -10,8 +10,9 @@ const hud = {
   status: document.getElementById("status")
 };
 
-const MAP_BOUNDS = { minLon: 55.0, maxLon: 57.9, minLat: 24.9, maxLat: 27.2 };
-const TILE_Z = 8;
+// Expanded theater: includes northern Gulf approaches (Kharg area) + southern exits
+const MAP_BOUNDS = { minLon: 49.6, maxLon: 59.2, minLat: 23.6, maxLat: 30.1 };
+const TILE_Z = 7;
 const TILE_SIZE = 256;
 
 function mercatorX(lon) {
@@ -44,17 +45,22 @@ function lonLatToWorld(lon, lat) {
   };
 }
 
-const straitRouteLonLat = [
-  [55.25, 26.18],
-  [55.55, 26.10],
-  [55.95, 26.03],
-  [56.30, 26.13],
-  [56.62, 26.24],
-  [56.92, 26.16],
-  [57.25, 26.08],
-  [57.62, 26.18]
+// Long navigable shipping trunk: Kharg approaches -> Strait -> Gulf of Oman exit
+const trunkRouteLonLat = [
+  [50.20, 29.25],
+  [51.10, 29.00],
+  [52.30, 28.55],
+  [53.35, 28.05],
+  [54.30, 27.45],
+  [55.10, 26.95],
+  [55.70, 26.55],
+  [56.30, 26.35],
+  [56.95, 26.22],
+  [57.60, 26.04],
+  [58.25, 25.55],
+  [58.85, 24.95]
 ];
-const routePoints = straitRouteLonLat.map(([lon, lat]) => lonLatToWorld(lon, lat));
+const routePoints = trunkRouteLonLat.map(([lon, lat]) => lonLatToWorld(lon, lat));
 
 const routeSegments = [];
 let routeLength = 0;
@@ -70,7 +76,6 @@ function sampleRoute(t) {
   const clampedT = Math.max(0, Math.min(1, t));
   const distance = clampedT * routeLength;
   let seg = routeSegments[routeSegments.length - 1];
-
   for (const s of routeSegments) {
     if (distance >= s.start && distance <= s.end) {
       seg = s;
@@ -81,11 +86,12 @@ function sampleRoute(t) {
   const local = seg.len <= 0.001 ? 0 : (distance - seg.start) / seg.len;
   const x = seg.a.x + (seg.b.x - seg.a.x) * local;
   const y = seg.a.y + (seg.b.y - seg.a.y) * local;
+
   const tx = seg.b.x - seg.a.x;
   const ty = seg.b.y - seg.a.y;
-  const tlen = Math.hypot(tx, ty) || 1;
-  const ux = tx / tlen;
-  const uy = ty / tlen;
+  const tLen = Math.hypot(tx, ty) || 1;
+  const ux = tx / tLen;
+  const uy = ty / tLen;
   const nx = -uy;
   const ny = ux;
 
@@ -94,7 +100,6 @@ function sampleRoute(t) {
 
 function nearestOnRoute(point) {
   let best = null;
-
   for (const seg of routeSegments) {
     const vx = seg.b.x - seg.a.x;
     const vy = seg.b.y - seg.a.y;
@@ -109,9 +114,9 @@ function nearestOnRoute(point) {
     const dist = Math.hypot(dx, dy);
 
     if (!best || dist < best.dist) {
-      const segTangentLen = Math.hypot(vx, vy) || 1;
-      const tx = vx / segTangentLen;
-      const ty = vy / segTangentLen;
+      const segLen = Math.hypot(vx, vy) || 1;
+      const tx = vx / segLen;
+      const ty = vy / segLen;
       const nx = -ty;
       const ny = tx;
       const along = seg.start + seg.len * u;
@@ -120,30 +125,25 @@ function nearestOnRoute(point) {
         y: py,
         dist,
         routeT: along / routeLength,
-        tangent: { x: tx, y: ty },
         normal: { x: nx, y: ny },
+        tangent: { x: tx, y: ty },
         signedOffset: dx * nx + dy * ny
       };
     }
   }
-
   return best;
 }
 
-const corridorHalfWidth = 74;
-
-function clampToCorridor(point, margin = 10) {
+// Water-rule proxy: ships are constrained to this navigable corridor around route centerline.
+const corridorHalfWidth = 46;
+function clampToCorridor(point, margin = 6) {
   const n = nearestOnRoute(point);
   const maxOffset = corridorHalfWidth - margin;
-  const offset = Math.max(-maxOffset, Math.min(maxOffset, n.signedOffset));
-  return {
-    x: n.x + n.normal.x * offset,
-    y: n.y + n.normal.y * offset
-  };
+  const off = Math.max(-maxOffset, Math.min(maxOffset, n.signedOffset));
+  return { x: n.x + n.normal.x * off, y: n.y + n.normal.y * off };
 }
 
 const tileCache = new Map();
-
 function getTile(z, x, y) {
   const key = `${z}/${x}/${y}`;
   if (tileCache.has(key)) return tileCache.get(key);
@@ -157,7 +157,7 @@ function getTile(z, x, y) {
 }
 
 const state = {
-  camera: { x: 0, y: 0, speed: 660 },
+  camera: { x: 0, y: 0, speed: 760 },
   keys: new Set(),
   pointer: { down: false, moved: false, lx: 0, ly: 0 },
   gamepad: { prevButtons: [] },
@@ -174,7 +174,9 @@ const state = {
   threats: [],
   projectiles: [],
   tollGates: [],
-  spawn: { tankerAt: 1.3, threatAt: 2.8 },
+  alliedPickups: [],
+  alliedShieldCharges: 0,
+  spawn: { tankerAt: 1.2, threatAt: 2.5, alliedAt: 16 },
   message: "Status: Running",
   messageTimer: 0,
   ended: false
@@ -189,10 +191,11 @@ const cargoTypes = [
   { name: "Containers", fireRisk: 0.5, value: 110 }
 ];
 
+// Smaller map-relative silhouettes
 const tankerSizes = [
-  { key: "small", hp: 100, speed: 72, radius: 10 },
-  { key: "medium", hp: 160, speed: 64, radius: 14 },
-  { key: "large", hp: 235, speed: 54, radius: 18 }
+  { key: "small", hp: 100, speed: 76, radius: 6 },
+  { key: "medium", hp: 160, speed: 67, radius: 8 },
+  { key: "large", hp: 235, speed: 58, radius: 11 }
 ];
 
 function rng(min, max) {
@@ -205,49 +208,53 @@ function pick(arr) {
 
 function init() {
   for (let i = 0; i < 3; i++) spawnEscort(i);
-  for (let i = 0; i < 7; i++) spawnTanker(i % 2 === 0 ? 1 : -1);
+  for (let i = 0; i < 9; i++) spawnTanker(i % 2 === 0 ? 1 : -1);
 
-  state.tollGates = [0.22, 0.49, 0.76].map((t) => {
+  state.tollGates = [0.18, 0.42, 0.67, 0.86].map((t) => {
     const p = sampleRoute(t);
-    return { t, x: p.x, y: p.y, cooldown: 0, radius: 15 };
+    return { x: p.x, y: p.y, radius: 11, cooldown: 0 };
   });
 
-  const first = sampleRoute(0.08);
-  state.camera.x = first.x - 260;
-  state.camera.y = first.y - 200;
+  const start = sampleRoute(0.1);
+  state.camera.x = start.x - canvas.width * 0.35;
+  state.camera.y = start.y - canvas.height * 0.25;
 
   bindInput();
   requestAnimationFrame(loop);
 }
 
 function spawnEscort(i) {
-  const base = sampleRoute(0.06 + i * 0.02);
-  const escort = {
+  const base = sampleRoute(0.08 + i * 0.015);
+  const e = {
     kind: "escort",
-    x: base.x + base.normal.x * (30 + i * 22),
-    y: base.y + base.normal.y * (30 + i * 22),
+    x: base.x + base.normal.x * (18 + i * 14),
+    y: base.y + base.normal.y * (18 + i * 14),
+    vx: 0,
+    vy: 0,
+    heading: { x: 1, y: 0 },
     hp: 200,
     maxHp: 200,
-    radius: 11,
-    speed: 152,
+    radius: 5,
+    speed: 162,
     waypoint: null,
     samReload: 0,
     ciwsReload: 0,
     manualVx: 0,
     manualVy: 0
   };
-  state.escorts.push(escort);
-  state.ships.push(escort);
+  state.escorts.push(e);
+  state.ships.push(e);
 }
 
 function spawnTanker(direction = Math.random() < 0.5 ? 1 : -1) {
   const size = pick(tankerSizes);
   const cargo = pick(cargoTypes);
-  const full = Math.random() < (direction === 1 ? 0.72 : 0.4);
-  const startT = direction === 1 ? rng(0, 0.05) : rng(0.95, 1);
-  const laneOffset = rng(-45, 45);
-  const base = sampleRoute(startT);
-  const tanker = {
+  const full = Math.random() < (direction === 1 ? 0.72 : 0.38);
+  const t0 = direction === 1 ? rng(0, 0.04) : rng(0.96, 1);
+  const laneOffset = rng(-28, 28);
+  const base = sampleRoute(t0);
+
+  state.ships.push({
     kind: "tanker",
     size: size.key,
     cargo: cargo.name,
@@ -255,11 +262,12 @@ function spawnTanker(direction = Math.random() < 0.5 ? 1 : -1) {
     fireRisk: full ? cargo.fireRisk : Math.max(0.2, cargo.fireRisk * 0.45),
     loadState: full ? "FULL" : "EMPTY",
     direction,
-    routeT: startT,
+    routeT: t0,
     laneOffset,
     targetLaneOffset: laneOffset,
-    speed: full ? size.speed * 0.93 : size.speed * 1.08,
+    speed: full ? size.speed * 0.92 : size.speed * 1.08,
     boostTimer: 0,
+    heading: direction === 1 ? { ...base.tangent } : { x: -base.tangent.x, y: -base.tangent.y },
     hp: size.hp,
     maxHp: size.hp,
     radius: size.radius,
@@ -268,30 +276,44 @@ function spawnTanker(direction = Math.random() < 0.5 ? 1 : -1) {
     burning: false,
     burn: 0,
     sunk: false
-  };
-  state.ships.push(tanker);
+  });
 }
 
+// Iranian side attacks only (north side / smaller world Y)
 function spawnThreat() {
-  const alive = state.ships.filter((s) => s.kind === "tanker" && !s.sunk);
-  if (!alive.length) return;
-
-  const target = pick(alive);
+  const targets = state.ships.filter((s) => s.kind === "tanker" && !s.sunk);
+  if (!targets.length) return;
+  const target = pick(targets);
   const kind = Math.random() < 0.57 ? "drone" : "missile";
-  const center = sampleRoute(target.routeT);
-  const side = Math.random() < 0.5 ? -1 : 1;
 
-  const threat = {
+  const center = sampleRoute(target.routeT);
+  const xJitter = rng(-220, 220);
+  const yNorthOffset = rng(120, 280);
+  const spawnX = center.x + xJitter;
+  const spawnY = Math.max(0, center.y - yNorthOffset);
+
+  state.threats.push({
     kind,
-    x: center.x + center.normal.x * (corridorHalfWidth + rng(100, 260) * side),
-    y: center.y + center.normal.y * (corridorHalfWidth + rng(100, 260) * side),
-    speed: kind === "missile" ? 240 : 165,
+    x: spawnX,
+    y: spawnY,
+    speed: kind === "missile" ? 245 : 165,
     hp: kind === "missile" ? 34 : 18,
     damage: kind === "missile" ? 44 : 20,
     target,
-    radius: kind === "missile" ? 4 : 3
-  };
-  state.threats.push(threat);
+    radius: kind === "missile" ? 3 : 2
+  });
+}
+
+function spawnAlliedPickup() {
+  const t = rng(0.2, 0.9);
+  const p = sampleRoute(t);
+  // Allied side approximate = south side (larger world Y)
+  state.alliedPickups.push({
+    x: p.x + p.normal.x * -24,
+    y: p.y + p.normal.y * -24,
+    radius: 9,
+    life: 28
+  });
 }
 
 function bindInput() {
@@ -300,19 +322,20 @@ function bindInput() {
   window.addEventListener("keydown", (e) => {
     const k = e.key.toLowerCase();
     state.keys.add(k);
+
     if (e.key === "Tab") {
       e.preventDefault();
       state.selectedEscort = (state.selectedEscort + 1) % state.escorts.length;
       state.selectedTanker = null;
     }
+
     if (k === "f") useDamageControl();
-    if (["1", "2", "3"].includes(e.key)) {
-      state.priority = e.key === "1" ? "missile" : e.key === "2" ? "drone" : "any";
-    }
-    const selT = state.selectedTanker;
-    if (selT && selT.kind === "tanker" && !selT.sunk) {
-      if (k === "u") selT.targetLaneOffset = Math.max(-58, selT.targetLaneOffset - 18);
-      if (k === "o") selT.targetLaneOffset = Math.min(58, selT.targetLaneOffset + 18);
+    if (["1", "2", "3"].includes(e.key)) state.priority = e.key === "1" ? "missile" : e.key === "2" ? "drone" : "any";
+
+    const t = state.selectedTanker;
+    if (t && !t.sunk) {
+      if (k === "u") t.targetLaneOffset = Math.max(-34, t.targetLaneOffset - 12);
+      if (k === "o") t.targetLaneOffset = Math.min(34, t.targetLaneOffset + 12);
     }
   });
 
@@ -349,30 +372,23 @@ function screenToWorld(screenX, screenY) {
 function handleTap(screenX, screenY) {
   const p = screenToWorld(screenX, screenY);
 
-  let hitEscort = null;
   for (let i = 0; i < state.escorts.length; i++) {
     const e = state.escorts[i];
-    if (Math.hypot(e.x - p.x, e.y - p.y) < e.radius + 10) {
-      hitEscort = i;
-      break;
+    if (Math.hypot(e.x - p.x, e.y - p.y) < e.radius + 8) {
+      state.selectedEscort = i;
+      state.selectedTanker = null;
+      return;
     }
   }
-  if (hitEscort !== null) {
-    state.selectedEscort = hitEscort;
-    state.selectedTanker = null;
-    return;
-  }
 
-  const hitTanker = state.ships.find(
-    (s) => s.kind === "tanker" && !s.sunk && Math.hypot(s.x - p.x, s.y - p.y) < s.radius + 10
-  );
-  if (hitTanker) {
-    state.selectedTanker = hitTanker;
+  const tanker = state.ships.find((s) => s.kind === "tanker" && !s.sunk && Math.hypot(s.x - p.x, s.y - p.y) < s.radius + 8);
+  if (tanker) {
+    state.selectedTanker = tanker;
     return;
   }
 
   const burning = state.ships.find(
-    (s) => s.kind === "tanker" && s.burning && !s.sunk && Math.hypot(s.x - p.x, s.y - p.y) < s.radius + 12
+    (s) => s.kind === "tanker" && s.burning && !s.sunk && Math.hypot(s.x - p.x, s.y - p.y) < s.radius + 10
   );
   if (burning) {
     useDamageControl(burning);
@@ -380,36 +396,33 @@ function handleTap(screenX, screenY) {
   }
 
   if (state.selectedTanker && !state.selectedTanker.sunk) {
-    const nearest = nearestOnRoute(p);
-    const offset = Math.max(-58, Math.min(58, nearest.signedOffset));
-    state.selectedTanker.targetLaneOffset = offset;
+    const n = nearestOnRoute(p);
+    state.selectedTanker.targetLaneOffset = Math.max(-34, Math.min(34, n.signedOffset));
     return;
   }
 
   const esc = state.escorts[state.selectedEscort];
-  if (!esc) return;
-  esc.waypoint = clampToCorridor(p, 12);
+  if (esc) esc.waypoint = clampToCorridor(p, 6);
 }
 
-function useDamageControl(forcedTarget = null) {
+function useDamageControl(forced = null) {
   const escort = state.escorts[state.selectedEscort];
   if (!escort) return;
   const candidates = state.ships
     .filter((s) => s.kind === "tanker" && s.burning && !s.sunk)
     .sort((a, b) => Math.hypot(a.x - escort.x, a.y - escort.y) - Math.hypot(b.x - escort.x, b.y - escort.y));
-  const target = forcedTarget || candidates[0];
-  if (!target) return;
+  const t = forced || candidates[0];
+  if (!t) return;
+  if (Math.hypot(t.x - escort.x, t.y - escort.y) > 240) return;
 
-  const d = Math.hypot(target.x - escort.x, target.y - escort.y);
-  if (d > 240) return;
-
-  target.burn = Math.max(0, target.burn - 1.35);
-  if (target.burn <= 0.12) target.burning = false;
+  t.burn = Math.max(0, t.burn - 1.35);
+  if (t.burn <= 0.12) t.burning = false;
   state.score += 8;
 }
 
 function update(dt) {
   if (state.ended) return;
+
   state.time += dt;
   state.messageTimer = Math.max(0, state.messageTimer - dt);
 
@@ -421,7 +434,11 @@ function update(dt) {
   }
   if (state.time > state.spawn.threatAt) {
     spawnThreat();
-    state.spawn.threatAt = state.time + rng(1.05, 2.1);
+    state.spawn.threatAt = state.time + rng(1.0, 2.0);
+  }
+  if (state.time > state.spawn.alliedAt) {
+    spawnAlliedPickup();
+    state.spawn.alliedAt = state.time + rng(20, 30);
   }
 
   updateEscorts(dt);
@@ -430,6 +447,7 @@ function update(dt) {
   updateWeapons();
   updateProjectiles(dt);
   updateTollGates(dt);
+  updateAlliedPickups(dt);
 
   if (state.time >= state.duration) {
     state.ended = true;
@@ -442,28 +460,27 @@ function update(dt) {
   hud.delivered.textContent = `Delivered: ${state.delivered}`;
   hud.lost.textContent = `Lost: ${state.lost}`;
   hud.burning.textContent = `Burning: ${burningCount}`;
-  hud.status.textContent = state.messageTimer > 0 ? state.message : `Status: ${state.ended ? "Ended" : "Running"}`;
+  hud.status.textContent = state.messageTimer > 0 ? state.message : `Status: Running (Shield ${state.alliedShieldCharges})`;
 }
 
 function updateCamera(dt) {
-  const cam = state.camera;
-  const boost = state.keys.has("shift") ? 2.1 : 1;
-  if (state.keys.has("arrowleft") || state.keys.has("a")) cam.x -= cam.speed * boost * dt;
-  if (state.keys.has("arrowright") || state.keys.has("d")) cam.x += cam.speed * boost * dt;
-  if (state.keys.has("arrowup") || state.keys.has("w")) cam.y -= cam.speed * boost * dt;
-  if (state.keys.has("arrowdown") || state.keys.has("s")) cam.y += cam.speed * boost * dt;
+  const boost = state.keys.has("shift") ? 2.2 : 1;
+  if (state.keys.has("arrowleft") || state.keys.has("a")) state.camera.x -= state.camera.speed * boost * dt;
+  if (state.keys.has("arrowright") || state.keys.has("d")) state.camera.x += state.camera.speed * boost * dt;
+  if (state.keys.has("arrowup") || state.keys.has("w")) state.camera.y -= state.camera.speed * boost * dt;
+  if (state.keys.has("arrowdown") || state.keys.has("s")) state.camera.y += state.camera.speed * boost * dt;
 
   handleGamepad(dt);
 
   const maxX = Math.max(0, WORLD.width - canvas.width);
   const maxY = Math.max(0, WORLD.height - (canvas.height - 54));
-  cam.x = Math.max(-80, Math.min(maxX + 80, cam.x));
-  cam.y = Math.max(-80, Math.min(maxY + 120, cam.y));
+  state.camera.x = Math.max(-100, Math.min(maxX + 100, state.camera.x));
+  state.camera.y = Math.max(-100, Math.min(maxY + 120, state.camera.y));
 }
 
 function updateEscorts(dt) {
-  const selectedEscort = state.escorts[state.selectedEscort];
-  if (selectedEscort) {
+  const selected = state.escorts[state.selectedEscort];
+  if (selected) {
     const steer = { x: 0, y: 0 };
     if (state.keys.has("j")) steer.x -= 1;
     if (state.keys.has("l")) steer.x += 1;
@@ -471,17 +488,18 @@ function updateEscorts(dt) {
     if (state.keys.has("k")) steer.y += 1;
 
     if (steer.x || steer.y) {
-      const mag = Math.hypot(steer.x, steer.y) || 1;
-      selectedEscort.manualVx = (steer.x / mag) * selectedEscort.speed;
-      selectedEscort.manualVy = (steer.y / mag) * selectedEscort.speed;
-      selectedEscort.waypoint = null;
+      const m = Math.hypot(steer.x, steer.y) || 1;
+      selected.manualVx = (steer.x / m) * selected.speed;
+      selected.manualVy = (steer.y / m) * selected.speed;
+      selected.waypoint = null;
     } else {
-      selectedEscort.manualVx *= 0.86;
-      selectedEscort.manualVy *= 0.86;
+      selected.manualVx *= 0.86;
+      selected.manualVy *= 0.86;
     }
   }
 
   for (const e of state.escorts) {
+    const prev = { x: e.x, y: e.y };
     if (Math.hypot(e.manualVx, e.manualVy) > 2) {
       e.x += e.manualVx * dt;
       e.y += e.manualVy * dt;
@@ -489,15 +507,21 @@ function updateEscorts(dt) {
       const dx = e.waypoint.x - e.x;
       const dy = e.waypoint.y - e.y;
       const d = Math.hypot(dx, dy);
-      if (d < 6) e.waypoint = null;
+      if (d < 4) e.waypoint = null;
       else {
-        e.x += (dx / d) * e.speed * 1.25 * dt;
-        e.y += (dy / d) * e.speed * 1.25 * dt;
+        e.x += (dx / d) * e.speed * 1.2 * dt;
+        e.y += (dy / d) * e.speed * 1.2 * dt;
       }
     }
-    const c = clampToCorridor({ x: e.x, y: e.y }, 8);
+
+    const c = clampToCorridor({ x: e.x, y: e.y }, 5);
     e.x = c.x;
     e.y = c.y;
+    const vx = e.x - prev.x;
+    const vy = e.y - prev.y;
+    const l = Math.hypot(vx, vy);
+    if (l > 0.01) e.heading = { x: vx / l, y: vy / l };
+
     e.samReload -= dt;
     e.ciwsReload -= dt;
   }
@@ -508,9 +532,9 @@ function updateTankers(dt) {
     if (t.kind !== "tanker" || t.sunk) continue;
 
     t.laneOffset += (t.targetLaneOffset - t.laneOffset) * dt * 2;
-    const moveBoost = t.boostTimer > 0 ? 1.35 : 1;
+    const moveBoost = t.boostTimer > 0 ? 1.34 : 1;
     t.boostTimer = Math.max(0, t.boostTimer - dt);
-    t.routeT += (t.direction * t.speed * moveBoost * 1.14 * dt) / routeLength;
+    t.routeT += (t.direction * t.speed * moveBoost * 1.15 * dt) / routeLength;
 
     if (t.burning) {
       t.burn += dt * 0.38;
@@ -525,8 +549,7 @@ function updateTankers(dt) {
       continue;
     }
 
-    const outOfBounds = t.routeT > 1.02 || t.routeT < -0.02;
-    if (outOfBounds) {
+    if (t.routeT > 1.02 || t.routeT < -0.02) {
       t.sunk = true;
       state.delivered += 1;
       state.score += 45 + t.cargoValue;
@@ -537,6 +560,7 @@ function updateTankers(dt) {
     const p = sampleRoute(t.routeT);
     t.x = p.x + p.normal.x * t.laneOffset;
     t.y = p.y + p.normal.y * t.laneOffset;
+    t.heading = t.direction === 1 ? { ...p.tangent } : { x: -p.tangent.x, y: -p.tangent.y };
   }
 }
 
@@ -546,12 +570,27 @@ function updateThreats(dt) {
       th.hp = -1;
       continue;
     }
+
+    // allied shield support: consumes charge to intercept incoming threat near convoy
+    if (state.alliedShieldCharges > 0) {
+      const nearConvoy = Math.hypot(th.x - th.target.x, th.y - th.target.y) < 160;
+      if (nearConvoy) {
+        state.alliedShieldCharges -= 1;
+        th.hp = -1;
+        state.score += 18;
+        state.message = "Status: Allied shield intercepted threat";
+        state.messageTimer = 1.2;
+        continue;
+      }
+    }
+
     const dx = th.target.x - th.x;
     const dy = th.target.y - th.y;
     const d = Math.hypot(dx, dy) || 0.001;
     th.x += (dx / d) * th.speed * dt;
     th.y += (dy / d) * th.speed * dt;
-    if (d < th.target.radius + 8) {
+
+    if (d < th.target.radius + 7) {
       th.target.hp -= th.damage;
       if (!th.target.burning && Math.random() < 0.45 * th.target.fireRisk) {
         th.target.burning = true;
@@ -564,32 +603,31 @@ function updateThreats(dt) {
 }
 
 function updateWeapons() {
-  for (const esc of state.escorts) {
-    let targets = state.threats.filter((t) => Math.hypot(t.x - esc.x, t.y - esc.y) < 480);
+  for (const e of state.escorts) {
+    let targets = state.threats.filter((t) => Math.hypot(t.x - e.x, t.y - e.y) < 460);
     if (!targets.length) continue;
-
     if (state.priority !== "any") {
       const pref = targets.filter((t) => t.kind === state.priority);
       if (pref.length) targets = pref;
     }
 
-    targets.sort((a, b) => Math.hypot(a.x - esc.x, a.y - esc.y) - Math.hypot(b.x - esc.x, b.y - esc.y));
-    const target = targets[0];
-    const d = Math.hypot(target.x - esc.x, target.y - esc.y);
+    targets.sort((a, b) => Math.hypot(a.x - e.x, a.y - e.y) - Math.hypot(b.x - e.x, b.y - e.y));
+    const t = targets[0];
+    const d = Math.hypot(t.x - e.x, t.y - e.y);
 
-    if (d < 480 && esc.samReload <= 0) {
-      fireProjectile(esc.x, esc.y, target, 460, 24, "sam");
-      esc.samReload = 0.9;
+    if (d < 460 && e.samReload <= 0) {
+      fireProjectile(e.x, e.y, t, 470, 24, "sam");
+      e.samReload = 0.9;
     }
-    if (d < 170 && esc.ciwsReload <= 0) {
-      fireProjectile(esc.x, esc.y, target, 650, 10, "ciws");
-      esc.ciwsReload = 0.11;
+    if (d < 150 && e.ciwsReload <= 0) {
+      fireProjectile(e.x, e.y, t, 660, 10, "ciws");
+      e.ciwsReload = 0.11;
     }
   }
 }
 
 function fireProjectile(x, y, target, speed, damage, kind) {
-  state.projectiles.push({ x, y, target, speed, damage, kind, life: 1.7 });
+  state.projectiles.push({ x, y, target, speed, damage, kind, life: 1.6 });
 }
 
 function updateProjectiles(dt) {
@@ -604,7 +642,7 @@ function updateProjectiles(dt) {
     const d = Math.hypot(dx, dy) || 0.001;
     p.x += (dx / d) * p.speed * dt;
     p.y += (dy / d) * p.speed * dt;
-    if (d < p.target.radius + 5) {
+    if (d < p.target.radius + 4) {
       p.target.hp -= p.damage;
       p.life = -1;
       state.score += p.kind === "sam" ? 4 : 2;
@@ -618,19 +656,39 @@ function updateProjectiles(dt) {
 function updateTollGates(dt) {
   for (const gate of state.tollGates) {
     gate.cooldown = Math.max(0, gate.cooldown - dt);
-    for (const t of state.ships) {
-      if (t.kind !== "tanker" || t.sunk) continue;
-      const d = Math.hypot(t.x - gate.x, t.y - gate.y);
-      if (d < gate.radius + t.radius && gate.cooldown <= 0) {
+    for (const s of state.ships) {
+      if (s.kind !== "tanker" || s.sunk) continue;
+      const d = Math.hypot(s.x - gate.x, s.y - gate.y);
+      if (d < gate.radius + s.radius && gate.cooldown <= 0) {
         gate.cooldown = 16;
-        t.boostTimer = Math.max(t.boostTimer, 7);
-        const payout = t.loadState === "FULL" ? 36 : 20;
+        s.boostTimer = Math.max(s.boostTimer, 7);
+        const payout = s.loadState === "FULL" ? 36 : 20;
         state.score += payout;
         state.message = `Status: Toll paid +${payout} (speed boost)`;
-        state.messageTimer = 1.8;
+        state.messageTimer = 1.7;
       }
     }
   }
+}
+
+function updateAlliedPickups(dt) {
+  for (const p of state.alliedPickups) {
+    p.life -= dt;
+    if (p.life <= 0) continue;
+
+    const consumers = [...state.escorts, ...state.ships.filter((s) => s.kind === "tanker" && !s.sunk)];
+    for (const s of consumers) {
+      if (Math.hypot(s.x - p.x, s.y - p.y) < s.radius + p.radius) {
+        p.life = -1;
+        state.alliedShieldCharges += 4;
+        state.score += 24;
+        state.message = "Status: Allied defense link +4 shield charges";
+        state.messageTimer = 2;
+        break;
+      }
+    }
+  }
+  state.alliedPickups = state.alliedPickups.filter((p) => p.life > 0);
 }
 
 function handleGamepad(dt) {
@@ -638,8 +696,8 @@ function handleGamepad(dt) {
   if (!gp) return;
   const dead = (v) => (Math.abs(v) < 0.16 ? 0 : v);
 
-  state.camera.x += dead(gp.axes[0] || 0) * 480 * dt;
-  state.camera.y += dead(gp.axes[1] || 0) * 480 * dt;
+  state.camera.x += dead(gp.axes[0] || 0) * 520 * dt;
+  state.camera.y += dead(gp.axes[1] || 0) * 520 * dt;
 
   const pressed = (i) => gp.buttons[i] && gp.buttons[i].pressed;
   const tap = (i) => pressed(i) && !state.gamepad.prevButtons[i];
@@ -656,14 +714,15 @@ function handleGamepad(dt) {
   if (tap(12)) state.priority = "missile";
   if (tap(13)) state.priority = "drone";
   if (tap(15)) state.priority = "any";
+
   if (tap(2)) {
     const center = screenToWorld(canvas.width * 0.5, canvas.height * 0.5);
-    const esc = state.escorts[state.selectedEscort];
-    if (esc) esc.waypoint = clampToCorridor(center, 10);
+    const e = state.escorts[state.selectedEscort];
+    if (e) e.waypoint = clampToCorridor(center, 6);
   }
 
-  const esc = state.escorts[state.selectedEscort];
-  if (esc) {
+  const e = state.escorts[state.selectedEscort];
+  if (e) {
     let sx = 0;
     let sy = 0;
     if (pressed(14)) sx -= 1;
@@ -671,10 +730,10 @@ function handleGamepad(dt) {
     if (pressed(12)) sy -= 1;
     if (pressed(13)) sy += 1;
     if (sx || sy) {
-      const mag = Math.hypot(sx, sy) || 1;
-      esc.manualVx = (sx / mag) * esc.speed;
-      esc.manualVy = (sy / mag) * esc.speed;
-      esc.waypoint = null;
+      const m = Math.hypot(sx, sy) || 1;
+      e.manualVx = (sx / m) * e.speed;
+      e.manualVy = (sy / m) * e.speed;
+      e.waypoint = null;
     }
   }
 
@@ -687,8 +746,9 @@ function draw() {
   ctx.translate(-state.camera.x, -state.camera.y + 54);
 
   drawMapTiles();
-  drawRouteAndCorridor();
+  drawSeaCorridor();
   drawTollGates();
+  drawAlliedPickups();
 
   for (const s of state.ships) {
     if (s.kind === "tanker" && s.sunk) continue;
@@ -697,8 +757,8 @@ function draw() {
   }
   for (const t of state.threats) drawThreat(t);
   for (const p of state.projectiles) drawProjectile(p);
-
   drawLabels();
+
   ctx.restore();
 
   ctx.fillStyle = "rgba(10,20,32,0.72)";
@@ -737,9 +797,8 @@ function drawMapTiles() {
   }
 }
 
-function drawRouteAndCorridor() {
-  // corridor envelope
-  ctx.strokeStyle = "rgba(80, 176, 255, 0.32)";
+function drawSeaCorridor() {
+  ctx.strokeStyle = "rgba(75, 170, 255, 0.30)";
   ctx.lineWidth = corridorHalfWidth * 2;
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
@@ -748,21 +807,19 @@ function drawRouteAndCorridor() {
   for (let i = 1; i < routePoints.length; i++) ctx.lineTo(routePoints[i].x, routePoints[i].y);
   ctx.stroke();
 
-  // center line
-  ctx.strokeStyle = "rgba(214, 243, 255, 0.7)";
+  ctx.strokeStyle = "rgba(220,245,255,0.72)";
   ctx.lineWidth = 2;
-  ctx.setLineDash([14, 11]);
+  ctx.setLineDash([14, 12]);
   ctx.beginPath();
   ctx.moveTo(routePoints[0].x, routePoints[0].y);
   for (let i = 1; i < routePoints.length; i++) ctx.lineTo(routePoints[i].x, routePoints[i].y);
   ctx.stroke();
   ctx.setLineDash([]);
 
-  // threat zones outside corridor
   ctx.fillStyle = "rgba(255, 95, 95, 0.1)";
   for (const p of routePoints) {
     ctx.beginPath();
-    ctx.arc(p.x, p.y, corridorHalfWidth + 120, 0, Math.PI * 2);
+    ctx.arc(p.x, p.y - 130, corridorHalfWidth + 95, 0, Math.PI * 2);
     ctx.fill();
   }
 }
@@ -774,36 +831,58 @@ function drawTollGates() {
     ctx.beginPath();
     ctx.arc(gate.x, gate.y, gate.radius, 0, Math.PI * 2);
     ctx.fill();
-    ctx.strokeStyle = "rgba(20,20,20,0.55)";
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = "rgba(20,20,20,0.6)";
+    ctx.lineWidth = 1.5;
     ctx.stroke();
-
-    ctx.fillStyle = "#0d1929";
-    ctx.font = "11px Segoe UI";
-    ctx.fillText("TOLL", gate.x - 14, gate.y + 4);
   }
 }
 
-function drawEscort(e) {
-  ctx.fillStyle = "#7bd2ff";
+function drawAlliedPickups() {
+  for (const p of state.alliedPickups) {
+    ctx.save();
+    ctx.translate(p.x, p.y);
+    const pulse = 1 + Math.sin(state.time * 5) * 0.08;
+    ctx.scale(pulse, pulse);
+    ctx.fillStyle = "rgba(120, 255, 210, 0.92)";
+    drawStar(0, 0, 5, p.radius, p.radius * 0.45);
+    ctx.restore();
+  }
+}
+
+function drawStar(cx, cy, spikes, outerR, innerR) {
+  let rot = Math.PI / 2 * 3;
+  const step = Math.PI / spikes;
   ctx.beginPath();
-  ctx.arc(e.x, e.y, e.radius, 0, Math.PI * 2);
+  ctx.moveTo(cx, cy - outerR);
+  for (let i = 0; i < spikes; i++) {
+    ctx.lineTo(cx + Math.cos(rot) * outerR, cy + Math.sin(rot) * outerR);
+    rot += step;
+    ctx.lineTo(cx + Math.cos(rot) * innerR, cy + Math.sin(rot) * innerR);
+    rot += step;
+  }
+  ctx.lineTo(cx, cy - outerR);
+  ctx.closePath();
   ctx.fill();
+}
+
+function drawEscort(e) {
+  drawShipSprite(e.x, e.y, e.heading, e.radius * 1.9, "#8ed6ff", "#1d2a38");
+
   if (state.escorts[state.selectedEscort] === e) {
     ctx.strokeStyle = "#f5ff6a";
-    ctx.lineWidth = 2;
+    ctx.lineWidth = 1.5;
     ctx.beginPath();
-    ctx.arc(e.x, e.y, e.radius + 6, 0, Math.PI * 2);
+    ctx.arc(e.x, e.y, e.radius + 5, 0, Math.PI * 2);
     ctx.stroke();
   }
+
   if (e.waypoint) {
     ctx.strokeStyle = "rgba(170,255,200,0.8)";
+    ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.moveTo(e.x, e.y);
     ctx.lineTo(e.waypoint.x, e.waypoint.y);
     ctx.stroke();
-    ctx.fillStyle = "#a9ffd0";
-    ctx.fillRect(e.waypoint.x - 3, e.waypoint.y - 3, 6, 6);
   }
 }
 
@@ -816,79 +895,107 @@ function drawTanker(t) {
     Urea: "#def2be",
     Containers: "#c9d0d8"
   };
-  ctx.fillStyle = colors[t.cargo] || "#d6d6d6";
-  ctx.fillRect(t.x - t.radius * 1.55, t.y - t.radius * 0.85, t.radius * 3.1, t.radius * 1.7);
+  drawShipSprite(t.x, t.y, t.heading, t.radius * 2.2, colors[t.cargo] || "#d6d6d6", "#2f2d2a");
 
   if (state.selectedTanker === t) {
     ctx.strokeStyle = "#ffe66a";
-    ctx.lineWidth = 2;
-    ctx.strokeRect(t.x - t.radius * 1.65, t.y - t.radius * 0.95, t.radius * 3.3, t.radius * 1.9);
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.arc(t.x, t.y, t.radius + 5, 0, Math.PI * 2);
+    ctx.stroke();
   }
 
-  ctx.fillStyle = "rgba(0,0,0,0.35)";
-  ctx.fillRect(t.x - t.radius * 1.55, t.y + t.radius + 6, t.radius * 3.1, 5);
+  ctx.fillStyle = "rgba(0,0,0,0.38)";
+  ctx.fillRect(t.x - t.radius * 1.5, t.y + t.radius + 4, t.radius * 3, 4);
   ctx.fillStyle = "#72e497";
-  ctx.fillRect(t.x - t.radius * 1.55, t.y + t.radius + 6, Math.max(0, (t.hp / t.maxHp) * t.radius * 3.1), 5);
+  ctx.fillRect(t.x - t.radius * 1.5, t.y + t.radius + 4, Math.max(0, (t.hp / t.maxHp) * t.radius * 3), 4);
 
   ctx.fillStyle = t.loadState === "FULL" ? "#ffd88e" : "#d7e6f2";
-  ctx.font = "10px Segoe UI";
-  ctx.fillText(t.loadState, t.x - t.radius * 1.2, t.y - t.radius - 4);
+  ctx.font = "9px Segoe UI";
+  ctx.fillText(t.loadState, t.x - t.radius, t.y - t.radius - 4);
 
   if (t.burning) {
     ctx.fillStyle = "rgba(255,130,64,0.92)";
     ctx.beginPath();
-    ctx.arc(t.x, t.y - t.radius, 4 + t.burn * 3.6, 0, Math.PI * 2);
+    ctx.arc(t.x, t.y - t.radius, 3 + t.burn * 2.4, 0, Math.PI * 2);
     ctx.fill();
   }
 }
 
-function drawThreat(th) {
-  ctx.fillStyle = th.kind === "missile" ? "#ff7b66" : "#ffdf68";
+function drawShipSprite(x, y, heading, scale, hullColor, outlineColor) {
+  const a = Math.atan2(heading.y, heading.x);
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(a);
+
+  ctx.fillStyle = hullColor;
+  ctx.strokeStyle = outlineColor;
+  ctx.lineWidth = 1;
+
   ctx.beginPath();
-  ctx.arc(th.x, th.y, th.radius, 0, Math.PI * 2);
+  ctx.moveTo(scale * 1.1, 0);
+  ctx.lineTo(scale * 0.35, -scale * 0.45);
+  ctx.lineTo(-scale * 1.0, -scale * 0.30);
+  ctx.lineTo(-scale * 1.15, 0);
+  ctx.lineTo(-scale * 1.0, scale * 0.30);
+  ctx.lineTo(scale * 0.35, scale * 0.45);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.fillStyle = "rgba(255,255,255,0.35)";
+  ctx.fillRect(-scale * 0.2, -scale * 0.12, scale * 0.55, scale * 0.24);
+
+  ctx.restore();
+}
+
+function drawThreat(t) {
+  ctx.fillStyle = t.kind === "missile" ? "#ff7b66" : "#ffdf68";
+  ctx.beginPath();
+  ctx.arc(t.x, t.y, t.radius, 0, Math.PI * 2);
   ctx.fill();
 }
 
 function drawProjectile(p) {
   ctx.fillStyle = p.kind === "sam" ? "#6ef9ff" : "#ffffff";
   ctx.beginPath();
-  ctx.arc(p.x, p.y, p.kind === "sam" ? 2.8 : 1.8, 0, Math.PI * 2);
+  ctx.arc(p.x, p.y, p.kind === "sam" ? 2 : 1.5, 0, Math.PI * 2);
   ctx.fill();
 }
 
 function drawLabels() {
   const west = sampleRoute(0.02);
   const east = sampleRoute(0.98);
-  ctx.fillStyle = "rgba(10,20,32,0.58)";
-  ctx.fillRect(west.x - 84, west.y - 78, 170, 24);
-  ctx.fillRect(east.x - 84, east.y - 78, 170, 24);
+  ctx.fillStyle = "rgba(10,20,32,0.62)";
+  ctx.fillRect(west.x - 108, west.y - 74, 216, 24);
+  ctx.fillRect(east.x - 102, east.y - 74, 204, 24);
   ctx.fillStyle = "#eaf2ff";
   ctx.font = "14px Segoe UI";
-  ctx.fillText("West traffic queue", west.x - 76, west.y - 61);
-  ctx.fillText("East terminal", east.x - 67, east.y - 61);
+  ctx.fillText("Kharg / Gulf queue", west.x - 88, west.y - 57);
+  ctx.fillText("Arabian Sea exit", east.x - 78, east.y - 57);
 
   const selected = state.escorts[state.selectedEscort];
   if (selected) {
     ctx.fillStyle = "rgba(10,20,32,0.75)";
-    ctx.fillRect(state.camera.x + 12, state.camera.y + 66, 300, 72);
+    ctx.fillRect(state.camera.x + 12, state.camera.y + 66, 350, 72);
     ctx.fillStyle = "#dff0ff";
     ctx.fillText(`Selected Destroyer #${state.selectedEscort + 1}`, state.camera.x + 20, state.camera.y + 88);
     ctx.fillText(
-      `AA: SAM ${Math.max(0, selected.samReload).toFixed(1)}s | CIWS ${Math.max(0, selected.ciwsReload).toFixed(1)}s`,
+      `AA: SAM ${Math.max(0, selected.samReload).toFixed(1)}s | CIWS ${Math.max(0, selected.ciwsReload).toFixed(1)}s | Shield ${state.alliedShieldCharges}`,
       state.camera.x + 20,
       state.camera.y + 109
     );
-    ctx.fillText("Drag map / Shift+WASD fast pan", state.camera.x + 20, state.camera.y + 128);
+    ctx.fillText("Drag map or Shift+WASD for fast theater scroll", state.camera.x + 20, state.camera.y + 128);
   }
 
   if (state.selectedTanker && !state.selectedTanker.sunk) {
     const t = state.selectedTanker;
     ctx.fillStyle = "rgba(10,20,32,0.75)";
-    ctx.fillRect(state.camera.x + 320, state.camera.y + 66, 310, 72);
+    ctx.fillRect(state.camera.x + 370, state.camera.y + 66, 340, 72);
     ctx.fillStyle = "#f3fbff";
-    ctx.fillText(`Selected Tanker: ${t.cargo} (${t.loadState})`, state.camera.x + 328, state.camera.y + 88);
-    ctx.fillText(`Route: ${t.direction === 1 ? "West → East" : "East → West"}`, state.camera.x + 328, state.camera.y + 109);
-    ctx.fillText("Tap water or U/O to shift lane", state.camera.x + 328, state.camera.y + 128);
+    ctx.fillText(`Tanker: ${t.cargo} (${t.loadState})`, state.camera.x + 380, state.camera.y + 88);
+    ctx.fillText(`Route: ${t.direction === 1 ? "Kharg → Sea" : "Sea → Kharg"}`, state.camera.x + 380, state.camera.y + 109);
+    ctx.fillText("Tap water or U/O to shift lane within corridor", state.camera.x + 380, state.camera.y + 128);
   }
 }
 
