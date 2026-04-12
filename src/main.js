@@ -50,30 +50,30 @@ function lonLatToWorld(lon, lat) {
 // Long navigable shipping trunk aligned to deep-water centerline from Gulf -> Strait -> Oman Sea
 // Keep points offshore so route/corridor never cuts across Iranian land tiles.
 const trunkRouteLonLat = [
-  [50.22, 27.62],
-  [50.64, 27.42],
-  [51.12, 27.24],
-  [51.66, 27.02],
-  [52.26, 26.78],
-  [52.90, 26.57],
-  [53.56, 26.39],
-  [54.16, 26.26],
-  [54.72, 26.16],
-  [55.20, 26.09],
-  [55.62, 26.02],
-  [55.92, 25.96],
-  [56.18, 25.91],
-  [56.36, 25.89],
-  [56.52, 25.83],
-  [56.70, 25.74],
-  [56.90, 25.65],
-  [57.14, 25.55],
-  [57.42, 25.44],
-  [57.74, 25.33],
-  [58.10, 25.23],
-  [58.46, 25.13],
-  [58.78, 25.04],
-  [59.02, 24.94]
+  [50.20, 27.18],
+  [50.56, 27.00],
+  [50.98, 26.80],
+  [51.46, 26.56],
+  [52.00, 26.30],
+  [52.60, 26.05],
+  [53.24, 25.86],
+  [53.90, 25.74],
+  [54.54, 25.65],
+  [55.08, 25.58],
+  [55.56, 25.53],
+  [55.94, 25.50],
+  [56.22, 25.46],
+  [56.40, 25.39],
+  [56.56, 25.31],
+  [56.74, 25.22],
+  [56.96, 25.12],
+  [57.22, 25.01],
+  [57.52, 24.91],
+  [57.86, 24.82],
+  [58.22, 24.74],
+  [58.56, 24.67],
+  [58.84, 24.61],
+  [59.02, 24.56]
 ];
 const routePoints = trunkRouteLonLat.map(([lon, lat]) => lonLatToWorld(lon, lat));
 
@@ -153,11 +153,11 @@ function nearestOnRoute(point) {
 // Wider at the Gulf/Oman ends, narrower at the Strait pinch point.
 // Keep corridor conservative so traffic does not spill onto nearby coasts.
 // Wide at both ends, but much tighter through the Strait pinch.
-const corridorBaseWest = 16;
-const corridorBaseEast = 15;
+const corridorBaseWest = 42;
+const corridorBaseEast = 34;
 const straitPinchT = 0.69;
 const straitPinchSigma = 0.085;
-const straitPinchDepth = 7;
+const straitPinchDepth = 10;
 
 const ANCHOR_ZONES = {
   west: { lon: 55.35, lat: 25.92, radius: 42, entryT: 0.60 },
@@ -171,7 +171,7 @@ function corridorHalfWidthAtT(routeT) {
   const t = Math.max(0, Math.min(1, routeT));
   const base = corridorBaseWest + (corridorBaseEast - corridorBaseWest) * t;
   const pinch = straitPinchDepth * Math.exp(-((t - straitPinchT) ** 2) / (2 * straitPinchSigma * straitPinchSigma));
-  return Math.max(11, base - pinch);
+  return Math.max(22, base - pinch);
 }
 
 function maxLaneOffsetForRouteT(routeT, margin = 4) {
