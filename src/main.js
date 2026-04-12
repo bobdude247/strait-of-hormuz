@@ -293,11 +293,11 @@ function nearestOnRoute(point) {
 // Wider at the Gulf/Oman ends, narrower at the Strait pinch point.
 // Keep corridor conservative so traffic does not spill onto nearby coasts.
 // Wide at both ends, but much tighter through the Strait pinch.
-const corridorBaseWest = 38;
-const corridorBaseEast = 30;
+const corridorBaseWest = 40;
+const corridorBaseEast = 32;
 const straitPinchT = 0.70;
-const straitPinchSigma = 0.055;
-const straitPinchDepth = 22;
+const straitPinchSigma = 0.06;
+const straitPinchDepth = 14;
 
 const ANCHOR_ZONES = {
   west: { lon: 55.35, lat: 25.92, radius: 42, entryT: 0.60 },
@@ -306,16 +306,34 @@ const ANCHOR_ZONES = {
 
 const anchorWest = lonLatToWorld(ANCHOR_ZONES.west.lon, ANCHOR_ZONES.west.lat);
 const anchorEast = lonLatToWorld(ANCHOR_ZONES.east.lon, ANCHOR_ZONES.east.lat);
+const EAST_EXIT_LONLAT = { lon: 61.7, lat: 24.15 };
+const eastExitPoint = lonLatToWorld(EAST_EXIT_LONLAT.lon, EAST_EXIT_LONLAT.lat);
 
 function corridorHalfWidthAtT(routeT) {
   const t = Math.max(0, Math.min(1, routeT));
   const base = corridorBaseWest + (corridorBaseEast - corridorBaseWest) * t;
   const pinch = straitPinchDepth * Math.exp(-((t - straitPinchT) ** 2) / (2 * straitPinchSigma * straitPinchSigma));
-  return Math.max(10, base - pinch);
+  return Math.max(14, base - pinch);
 }
 
 function maxLaneOffsetForRouteT(routeT, margin = 4) {
   return Math.max(5, corridorHalfWidthAtT(routeT) - margin);
+}
+
+function isInEastExitExtension(point) {
+  return point.x > eastExitPoint.x - 120
+    && point.x < WORLD.width + 220
+    && point.y > eastExitPoint.y - 180
+    && point.y < eastExitPoint.y + 240;
+}
+
+function hasReachedDeliveryExit(tanker) {
+  const dx = tanker.x - eastExitPoint.x;
+  const dy = tanker.y - eastExitPoint.y;
+  const nearEastExit = Math.hypot(dx, dy) <= 70;
+  const offEast = tanker.x > WORLD.width + 30;
+  const deepEast = tanker.routeT > 0.985;
+  return tanker.direction === 1 && (nearEastExit || offEast || deepEast);
 }
 
 function clampToCorridor(point, margin = 6) {
@@ -372,7 +390,7 @@ function getTilePixelClass(worldX, worldY) {
 
 const waterClassCache = new Map();
 function isNavigableWater(point) {
-  if (!isInsideNavigablePolygon(point)) return false;
+  if (!isInsideNavigablePolygon(point) && !isInEastExitExtension(point)) return false;
   const key = `${Math.round(point.x / 4)}:${Math.round(point.y / 4)}`;
   if (waterClassCache.has(key)) return waterClassCache.get(key);
   const cls = getTilePixelClass(point.x, point.y);
@@ -401,6 +419,9 @@ function projectToNearestWater(point, maxRadius = 160, ringStep = 8) {
 }
 
 function clampPointToWater(point, fallback = null, maxRadius = 160) {
+  if (isInEastExitExtension(point) && getTilePixelClass(point.x, point.y) !== "land") {
+    return { x: point.x, y: point.y };
+  }
   const snapped = projectToNearestWater(point, maxRadius, 8);
   if (snapped) return snapped;
   return fallback ? { x: fallback.x, y: fallback.y } : { x: point.x, y: point.y };
@@ -1122,13 +1143,16 @@ function applyTankerSeparation() {
 
           lag.targetLaneOffset = clamp(lag.targetLaneOffset + lag.laneBias * steer * 1.35, -lagMax, lagMax);
           lead.targetLaneOffset = clamp(lead.targetLaneOffset - lag.laneBias * steer * 0.45, -leadMax, leadMax);
-          lag.boostTimer = Math.max(lag.boostTimer, 0.8);
+          lag.boostTimer = Math.max(lag.boostTimer, 1.4);
+          lag.recoveryTimer = Math.max(lag.recoveryTimer || 0, 1.6);
           lead.speed = Math.max((lead.cruiseSpeed || lead.speed) * 0.78, lead.speed * 0.985);
         } else {
           a.targetLaneOffset = clamp(a.targetLaneOffset - steer, -maxA, maxA);
           b.targetLaneOffset = clamp(b.targetLaneOffset + steer, -maxB, maxB);
           a.speed = Math.max((a.cruiseSpeed || a.speed) * 0.75, a.speed * 0.98);
           b.speed = Math.max((b.cruiseSpeed || b.speed) * 0.75, b.speed * 0.98);
+          a.recoveryTimer = Math.max(a.recoveryTimer || 0, 0.8);
+          b.recoveryTimer = Math.max(b.recoveryTimer || 0, 0.8);
         }
       }
     }
@@ -1211,7 +1235,7 @@ function updateTankers(dt) {
       continue;
     }
 
-    const exitedEast = t.direction === 1 && t.x > WORLD.width + 24;
+    const exitedEast = hasReachedDeliveryExit(t);
     const exitedWest = t.direction === -1 && t.x < -24;
     if (t.routeT > 1.08 || t.routeT < -0.08 || exitedEast || exitedWest) {
       t.sunk = true;
@@ -1260,8 +1284,10 @@ function updateTankers(dt) {
       const rescueStep = (8 + t.radius * 0.9) * (Math.random() < 0.5 ? -1 : 1) * (t.laneBias || 1);
       const laneMaxRescue = maxLaneOffsetForRouteT(t.routeT, 4);
       t.targetLaneOffset = clamp(t.targetLaneOffset + rescueStep, -laneMaxRescue, laneMaxRescue);
-      t.boostTimer = Math.max(t.boostTimer, 2.0);
-      t.recoveryTimer = Math.max(t.recoveryTimer, 3.0);
+      const sizeMul = Math.max(1, t.radius / 7.5);
+      t.boostTimer = Math.max(t.boostTimer, 2.4 * sizeMul);
+      t.recoveryTimer = Math.max(t.recoveryTimer, 3.4 * sizeMul);
+      t.laneBias = -t.laneBias;
       t.stuckTimer = 0.7;
       state.message = "Status: Auto-nav recovery active";
       state.messageTimer = 0.8;
