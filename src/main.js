@@ -454,6 +454,7 @@ const state = {
   priority: "missile",
   selectedEscort: 0,
   selectedTanker: null,
+  showShipStatus: false,
   ships: [],
   escorts: [],
   threats: [],
@@ -833,6 +834,7 @@ function bindInput() {
       e.preventDefault();
       state.selectedEscort = (state.selectedEscort + 1) % state.escorts.length;
       state.selectedTanker = null;
+      state.showShipStatus = false;
     }
 
     if (k === "f") useDamageControl();
@@ -908,13 +910,19 @@ function handleTap(screenX, screenY) {
     if (Math.hypot(e.x - p.x, e.y - p.y) < e.radius + 8) {
       state.selectedEscort = i;
       state.selectedTanker = null;
+      state.showShipStatus = false;
       return;
     }
   }
 
   const tanker = state.ships.find((s) => s.kind === "tanker" && !s.sunk && Math.hypot(s.x - p.x, s.y - p.y) < s.radius + 8);
   if (tanker) {
+    if (state.selectedTanker === tanker && state.showShipStatus) {
+      state.showShipStatus = false;
+      return;
+    }
     state.selectedTanker = tanker;
+    state.showShipStatus = true;
     return;
   }
 
@@ -1231,7 +1239,10 @@ function updateTankers(dt) {
       t.sunk = true;
       state.lost += 1;
       state.score -= 120;
-      if (state.selectedTanker === t) state.selectedTanker = null;
+      if (state.selectedTanker === t) {
+        state.selectedTanker = null;
+        state.showShipStatus = false;
+      }
       continue;
     }
 
@@ -1242,7 +1253,10 @@ function updateTankers(dt) {
       state.delivered += 1;
       state.score += 45 + t.cargoValue;
       grantDeliveryPowerProgress();
-      if (state.selectedTanker === t) state.selectedTanker = null;
+      if (state.selectedTanker === t) {
+        state.selectedTanker = null;
+        state.showShipStatus = false;
+      }
       continue;
     }
 
@@ -1450,10 +1464,12 @@ function handleGamepad(dt) {
   if (tap(4)) {
     state.selectedEscort = (state.selectedEscort - 1 + state.escorts.length) % state.escorts.length;
     state.selectedTanker = null;
+    state.showShipStatus = false;
   }
   if (tap(5)) {
     state.selectedEscort = (state.selectedEscort + 1) % state.escorts.length;
     state.selectedTanker = null;
+    state.showShipStatus = false;
   }
   if (tap(0)) useDamageControl();
   if (tap(12)) state.priority = "missile";
@@ -1718,8 +1734,8 @@ function drawStar(cx, cy, spikes, outerR, innerR) {
 
 function drawEscort(e) {
   drawShipSprite(e.x, e.y, e.heading, {
-    scale: e.radius * 2.15,
-    lengthMul: 2.05,
+    scale: e.radius * 1.95,
+    lengthMul: 2.32,
     hullColor: "#9aa5b3",
     outlineColor: "#2a313b",
     deckColor: "rgba(206,216,228,0.62)",
@@ -1756,7 +1772,6 @@ function drawTanker(t) {
   const c = classStyles[t.shipClass] || classStyles.Suezmax;
   const tankerVisualScale = Math.max(4.4, t.radius * 0.62);
   const labelOffset = Math.max(6, tankerVisualScale * 1.05);
-  const barWidth = Math.max(16, tankerVisualScale * 2.6);
 
   drawShipSprite(t.x, t.y, t.heading, {
     scale: tankerVisualScale,
@@ -1775,15 +1790,6 @@ function drawTanker(t) {
     ctx.arc(t.x, t.y, tankerVisualScale + 4, 0, Math.PI * 2);
     ctx.stroke();
   }
-
-  ctx.fillStyle = "rgba(0,0,0,0.38)";
-  ctx.fillRect(t.x - barWidth * 0.5, t.y + labelOffset, barWidth, 4);
-  ctx.fillStyle = "#72e497";
-  ctx.fillRect(t.x - barWidth * 0.5, t.y + labelOffset, Math.max(0, (t.hp / t.maxHp) * barWidth), 4);
-
-  ctx.fillStyle = t.loadState === "FULL" ? "#ffd88e" : "#d7e6f2";
-  ctx.font = "9px Segoe UI";
-  ctx.fillText(`${t.loadState} ${t.shipClass}`, t.x - barWidth * 0.5, t.y - labelOffset + 1);
 
   if (t.burning) {
     ctx.fillStyle = "rgba(255,130,64,0.92)";
@@ -1838,20 +1844,79 @@ function drawShipSprite(x, y, heading, spec) {
   ctx.strokeStyle = outlineColor;
   ctx.lineWidth = 1;
 
-  const nose = scale * 1.0;
-  const mid = scale * 0.35;
+  const isTankerLike = style === "tankerEmoji";
+  const isDestroyerLike = style === "destroyer";
+
+  const nose = scale * (isTankerLike ? 1.2 : isDestroyerLike ? 1.14 : 1.06);
+  const mid = scale * 0.34;
   const stern = -scale * lengthMul;
-  const beam = scale * 0.38;
+  const beam = scale * (isTankerLike ? 0.47 : isDestroyerLike ? 0.43 : 0.40);
 
   ctx.beginPath();
-  ctx.moveTo(nose, 0);
-  ctx.lineTo(mid, -beam);
-  ctx.lineTo(stern * 0.35, -beam * 0.88);
-  ctx.lineTo(stern, -beam * 0.32);
-  ctx.lineTo(stern - scale * 0.12, 0);
-  ctx.lineTo(stern, beam * 0.32);
-  ctx.lineTo(stern * 0.35, beam * 0.88);
-  ctx.lineTo(mid, beam);
+  if (isTankerLike) {
+    // Tanker: very full mid-body, pointed bow, and broad stern (not pinched).
+    const bow = scale * 1.24;
+    const bowShoulder = scale * 0.52;
+    const bodyFore = -scale * 0.38;
+    const bodyAft = stern * 0.86;
+    const transomX = stern - scale * 0.05;
+    const maxBeam = beam * 1.10;
+    const transomBeam = beam * 0.64;
+
+    ctx.moveTo(bow, 0);
+    ctx.quadraticCurveTo(scale * 0.84, -beam * 0.22, bowShoulder, -beam * 0.54);
+    ctx.quadraticCurveTo(scale * 0.06, -maxBeam, bodyFore, -maxBeam * 1.02);
+    ctx.lineTo(bodyAft, -maxBeam * 0.94);
+    ctx.quadraticCurveTo(transomX, -maxBeam * 0.74, transomX, -transomBeam);
+    ctx.lineTo(transomX, transomBeam);
+    ctx.quadraticCurveTo(transomX, maxBeam * 0.74, bodyAft, maxBeam * 0.94);
+    ctx.lineTo(bodyFore, maxBeam * 1.02);
+    ctx.quadraticCurveTo(scale * 0.06, maxBeam, bowShoulder, beam * 0.54);
+    ctx.quadraticCurveTo(scale * 0.84, beam * 0.22, bow, 0);
+  } else if (isDestroyerLike) {
+    // Destroyer: knife-like bow with slim forebody and firm (but not tiny) transom stern.
+    const bow = scale * 1.24;
+    const bowShoulder = scale * 0.72;
+    const foreBody = scale * 0.18;
+    const midBody = -scale * 0.42;
+    const aftBody = stern * 0.88;
+    const transomX = stern - scale * 0.02;
+    const maxBeam = beam * 0.86;
+    const transomBeam = beam * 0.44;
+
+    ctx.moveTo(bow, 0);
+    ctx.quadraticCurveTo(scale * 0.96, -beam * 0.08, bowShoulder, -beam * 0.32);
+    ctx.quadraticCurveTo(scale * 0.40, -beam * 0.76, foreBody, -maxBeam);
+    ctx.lineTo(midBody, -maxBeam * 1.03);
+    ctx.lineTo(aftBody, -maxBeam * 0.86);
+    ctx.lineTo(transomX, -transomBeam);
+    ctx.lineTo(transomX, transomBeam);
+    ctx.lineTo(aftBody, maxBeam * 0.86);
+    ctx.lineTo(midBody, maxBeam * 1.03);
+    ctx.quadraticCurveTo(scale * 0.40, beam * 0.76, bowShoulder, beam * 0.32);
+    ctx.quadraticCurveTo(scale * 0.96, beam * 0.08, bow, 0);
+  } else {
+    // Generic hull fallback.
+    const bowShoulderX = scale * 0.56;
+    const bowShoulderY = beam * 0.54;
+    const hullMidX = stern * 0.18;
+    const sternShoulderX = stern + scale * 0.30;
+    const sternEdgeY = beam * 0.78;
+    const sternFlatX = stern - scale * 0.02;
+    const sternFlatY = beam * 0.16;
+
+    ctx.moveTo(nose, 0);
+    ctx.lineTo(bowShoulderX, -bowShoulderY);
+    ctx.lineTo(mid, -beam);
+    ctx.lineTo(hullMidX, -beam * 0.96);
+    ctx.lineTo(sternShoulderX, -sternEdgeY);
+    ctx.lineTo(sternFlatX, -sternFlatY);
+    ctx.lineTo(sternFlatX, sternFlatY);
+    ctx.lineTo(sternShoulderX, sternEdgeY);
+    ctx.lineTo(hullMidX, beam * 0.96);
+    ctx.lineTo(mid, beam);
+    ctx.lineTo(bowShoulderX, bowShoulderY);
+  }
   ctx.closePath();
   ctx.fill();
   ctx.stroke();
@@ -2082,14 +2147,23 @@ function drawLabels() {
     );
   }
 
-  if (state.selectedTanker && !state.selectedTanker.sunk) {
+  if (state.showShipStatus && state.selectedTanker && !state.selectedTanker.sunk) {
     const t = state.selectedTanker;
+    const viewW = canvas.width / state.zoom;
+    const panelW = 332;
+    const panelH = 96;
+    const panelX = state.camera.x + viewW - panelW - 16;
+    const panelY = state.camera.y + 66;
+    const hullPct = Math.max(0, Math.round((t.hp / t.maxHp) * 100));
+    const speedKt = Math.round((t.speedNow || t.speed || 0) * 0.22);
     ctx.fillStyle = "rgba(10,20,32,0.75)";
-    ctx.fillRect(state.camera.x + 370, state.camera.y + 66, 340, 72);
+    ctx.fillRect(panelX, panelY, panelW, panelH);
     ctx.fillStyle = "#f3fbff";
-    ctx.fillText(`Tanker: ${t.shipClass} ${t.cargo} (${t.loadState})`, state.camera.x + 380, state.camera.y + 88);
-    ctx.fillText(`Route: ${t.direction === 1 ? "Kharg → Sea" : "Sea → Kharg"}`, state.camera.x + 380, state.camera.y + 109);
-    ctx.fillText("Tap water or U/O to shift lane within corridor", state.camera.x + 380, state.camera.y + 128);
+    ctx.fillText(`Ship Status: ${t.shipClass} (${t.loadState})`, panelX + 10, panelY + 22);
+    ctx.fillText(`Cargo: ${t.cargo} | Route: ${t.direction === 1 ? "Kharg → Sea" : "Sea → Kharg"}`, panelX + 10, panelY + 42);
+    ctx.fillText(`Hull: ${hullPct}% | Speed: ${speedKt} kt`, panelX + 10, panelY + 62);
+    ctx.fillStyle = t.burning ? "#ffb27d" : "#9fe8c0";
+    ctx.fillText(`Fire: ${t.burning ? "ACTIVE" : "NONE"}`, panelX + 10, panelY + 82);
   }
 }
 
