@@ -1718,11 +1718,11 @@ function drawStar(cx, cy, spikes, outerR, innerR) {
 
 function drawEscort(e) {
   drawShipSprite(e.x, e.y, e.heading, {
-    scale: e.radius * 2.0,
-    lengthMul: 1.9,
-    hullColor: "#8ed6ff",
-    outlineColor: "#1d2a38",
-    deckColor: "rgba(255,255,255,0.38)",
+    scale: e.radius * 2.15,
+    lengthMul: 2.05,
+    hullColor: "#9aa5b3",
+    outlineColor: "#2a313b",
+    deckColor: "rgba(206,216,228,0.62)",
     style: "destroyer",
     speedNow: e.speedNow || 0
   });
@@ -1873,9 +1873,75 @@ function drawShipSprite(x, y, heading, spec) {
     }
 
     if (style === "destroyer") {
-      ctx.fillStyle = "rgba(240,250,255,0.45)";
-      ctx.fillRect(stern * 0.28, -beam * 0.18, scale * 0.55, beam * 0.36);
-      ctx.fillRect(stern * 0.02, -beam * 0.14, scale * 0.25, beam * 0.28);
+      // modern gray destroyer profile: bridge blocks, VLS deck, mast, and gun mounts
+      ctx.fillStyle = "rgba(175,188,202,0.9)";
+      ctx.fillRect(stern * 0.82, -beam * 0.08, Math.abs(stern) * 0.72, beam * 0.16);
+
+      // forward superstructure / bridge
+      ctx.fillStyle = "rgba(160,174,189,0.95)";
+      ctx.fillRect(stern * 0.16, -beam * 0.38, scale * 0.74, beam * 0.76);
+      ctx.fillRect(stern * 0.02, -beam * 0.28, scale * 0.44, beam * 0.56);
+
+      // aft deckhouse
+      ctx.fillStyle = "rgba(152,167,182,0.92)";
+      ctx.fillRect(stern * 0.62, -beam * 0.30, scale * 0.54, beam * 0.60);
+
+      // bridge windows
+      ctx.fillStyle = "rgba(74, 95, 118, 0.82)";
+      for (let i = 0; i < 4; i++) {
+        ctx.fillRect(stern * 0.10 + i * scale * 0.14, -beam * 0.18, scale * 0.08, beam * 0.13);
+      }
+
+      // VLS cell cluster (midship)
+      ctx.fillStyle = "rgba(88, 102, 120, 0.7)";
+      for (let r = 0; r < 2; r++) {
+        for (let c = 0; c < 4; c++) {
+          ctx.fillRect(stern * 0.50 + c * scale * 0.11, -beam * 0.17 + r * beam * 0.18, scale * 0.07, beam * 0.12);
+        }
+      }
+
+      // mast and sensor array
+      ctx.strokeStyle = "rgba(66, 78, 94, 0.95)";
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.moveTo(stern * 0.03, 0);
+      ctx.lineTo(stern * 0.03 + scale * 0.03, -scale * 0.95);
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.moveTo(stern * 0.03 + scale * 0.02, -scale * 0.68);
+      ctx.lineTo(stern * 0.03 - scale * 0.23, -scale * 0.58);
+      ctx.moveTo(stern * 0.03 + scale * 0.02, -scale * 0.68);
+      ctx.lineTo(stern * 0.03 + scale * 0.26, -scale * 0.58);
+      ctx.stroke();
+
+      ctx.fillStyle = "rgba(210,220,232,0.95)";
+      ctx.beginPath();
+      ctx.arc(stern * 0.03 + scale * 0.03, -scale * 1.02, scale * 0.09, 0, Math.PI * 2);
+      ctx.fill();
+
+      // bow gun
+      ctx.fillStyle = "rgba(126,142,160,0.95)";
+      ctx.beginPath();
+      ctx.arc(scale * 0.56, 0, scale * 0.14, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = "rgba(58, 70, 86, 0.95)";
+      ctx.lineWidth = 1.1;
+      ctx.beginPath();
+      ctx.moveTo(scale * 0.66, 0);
+      ctx.lineTo(scale * 0.98, -scale * 0.03);
+      ctx.stroke();
+
+      // aft CIWS-style mount
+      ctx.fillStyle = "rgba(132,148,165,0.9)";
+      ctx.beginPath();
+      ctx.arc(stern * 0.76, 0, scale * 0.10, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = "rgba(58, 70, 86, 0.9)";
+      ctx.beginPath();
+      ctx.moveTo(stern * 0.76 + scale * 0.08, -scale * 0.02);
+      ctx.lineTo(stern * 0.76 + scale * 0.23, -scale * 0.04);
+      ctx.stroke();
     }
 
     if (style === "lng") {
