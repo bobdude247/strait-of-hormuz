@@ -1754,9 +1754,12 @@ function drawTanker(t) {
     LNG: { lengthMul: 2.6, deck: "rgba(234,242,250,0.34)", style: "tankerEmoji" }
   };
   const c = classStyles[t.shipClass] || classStyles.Suezmax;
+  const tankerVisualScale = Math.max(4.4, t.radius * 0.62);
+  const labelOffset = Math.max(6, tankerVisualScale * 1.05);
+  const barWidth = Math.max(16, tankerVisualScale * 2.6);
 
   drawShipSprite(t.x, t.y, t.heading, {
-    scale: t.radius * 2.0,
+    scale: tankerVisualScale,
     lengthMul: t.lengthMul || c.lengthMul,
     hullColor: "#2e343a",
     outlineColor: "#1b2026",
@@ -1769,23 +1772,23 @@ function drawTanker(t) {
     ctx.strokeStyle = "#ffe66a";
     ctx.lineWidth = 1.2;
     ctx.beginPath();
-    ctx.arc(t.x, t.y, t.radius + 5, 0, Math.PI * 2);
+    ctx.arc(t.x, t.y, tankerVisualScale + 4, 0, Math.PI * 2);
     ctx.stroke();
   }
 
   ctx.fillStyle = "rgba(0,0,0,0.38)";
-  ctx.fillRect(t.x - t.radius * 1.5, t.y + t.radius + 4, t.radius * 3, 4);
+  ctx.fillRect(t.x - barWidth * 0.5, t.y + labelOffset, barWidth, 4);
   ctx.fillStyle = "#72e497";
-  ctx.fillRect(t.x - t.radius * 1.5, t.y + t.radius + 4, Math.max(0, (t.hp / t.maxHp) * t.radius * 3), 4);
+  ctx.fillRect(t.x - barWidth * 0.5, t.y + labelOffset, Math.max(0, (t.hp / t.maxHp) * barWidth), 4);
 
   ctx.fillStyle = t.loadState === "FULL" ? "#ffd88e" : "#d7e6f2";
   ctx.font = "9px Segoe UI";
-  ctx.fillText(`${t.loadState} ${t.shipClass}`, t.x - t.radius * 1.35, t.y - t.radius - 4);
+  ctx.fillText(`${t.loadState} ${t.shipClass}`, t.x - barWidth * 0.5, t.y - labelOffset + 1);
 
   if (t.burning) {
     ctx.fillStyle = "rgba(255,130,64,0.92)";
     ctx.beginPath();
-    ctx.arc(t.x, t.y - t.radius, 3 + t.burn * 2.4, 0, Math.PI * 2);
+    ctx.arc(t.x, t.y - tankerVisualScale, 2.4 + t.burn * 2.0, 0, Math.PI * 2);
     ctx.fill();
   }
 }
