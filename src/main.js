@@ -125,17 +125,107 @@ const trunkRouteLonLat = [
   [59.02, 24.92],
   [59.55, 24.68]
 ];
-const routePoints = trunkRouteLonLat.map(([lon, lat]) => lonLatToWorld(lon, lat));
+const fallbackRoutePoints = trunkRouteLonLat.map(([lon, lat]) => lonLatToWorld(lon, lat));
 
-const routeSegments = [];
-let routeLength = 0;
-for (let i = 0; i < routePoints.length - 1; i++) {
-  const a = routePoints[i];
-  const b = routePoints[i + 1];
-  const len = Math.hypot(b.x - a.x, b.y - a.y);
-  routeSegments.push({ a, b, len, start: routeLength, end: routeLength + len });
-  routeLength += len;
+function buildPolygonCenterlineRoute(polygon, samples = 44) {
+  if (!polygon || polygon.length < 4) return [];
+
+  let minX = Infinity;
+  let maxX = -Infinity;
+  for (const p of polygon) {
+    if (p.x < minX) minX = p.x;
+    if (p.x > maxX) maxX = p.x;
+  }
+  if (!Number.isFinite(minX) || !Number.isFinite(maxX) || maxX - minX < 4) return [];
+
+  const route = [];
+  let prevY = null;
+
+  for (let i = 0; i < samples; i++) {
+    const x = minX + (i / (samples - 1)) * (maxX - minX);
+    const ys = [];
+
+    for (let a = 0, b = polygon.length - 1; a < polygon.length; b = a++) {
+      const p1 = polygon[b];
+      const p2 = polygon[a];
+      const xMin = Math.min(p1.x, p2.x);
+      const xMax = Math.max(p1.x, p2.x);
+      if (x < xMin || x > xMax) continue;
+
+      const dx = p2.x - p1.x;
+      if (Math.abs(dx) < 1e-6) {
+        ys.push(p1.y, p2.y);
+        continue;
+      }
+
+      const u = (x - p1.x) / dx;
+      if (u < 0 || u > 1) continue;
+      ys.push(p1.y + (p2.y - p1.y) * u);
+    }
+
+    ys.sort((m, n) => m - n);
+    if (ys.length < 2) continue;
+
+    let chosenMid = null;
+    let chosenSpan = -1;
+    for (let k = 0; k < ys.length - 1; k += 2) {
+      const yA = ys[k];
+      const yB = ys[k + 1];
+      const span = Math.abs(yB - yA);
+      const mid = (yA + yB) * 0.5;
+      if (span < 6) continue;
+
+      if (prevY != null && prevY >= Math.min(yA, yB) && prevY <= Math.max(yA, yB)) {
+        chosenMid = mid;
+        chosenSpan = span;
+        break;
+      }
+      if (span > chosenSpan) {
+        chosenMid = mid;
+        chosenSpan = span;
+      }
+    }
+
+    if (chosenMid == null) continue;
+    route.push({ x, y: chosenMid });
+    prevY = chosenMid;
+  }
+
+  if (route.length < 6) return [];
+
+  const smoothed = route.map((_, i) => {
+    const a = route[Math.max(0, i - 1)];
+    const b = route[i];
+    const c = route[Math.min(route.length - 1, i + 1)];
+    return { x: b.x, y: (a.y + b.y + c.y) / 3 };
+  });
+
+  const compact = [smoothed[0]];
+  for (let i = 1; i < smoothed.length; i++) {
+    const p = smoothed[i];
+    const last = compact[compact.length - 1];
+    if (Math.hypot(p.x - last.x, p.y - last.y) >= 10) compact.push(p);
+  }
+  return compact;
 }
+
+let routePoints = buildPolygonCenterlineRoute(navigablePolygonWorld, 44);
+if (routePoints.length < 8) routePoints = fallbackRoutePoints;
+
+let routeSegments = [];
+let routeLength = 0;
+function rebuildRouteGeometry(points) {
+  routeSegments = [];
+  routeLength = 0;
+  for (let i = 0; i < points.length - 1; i++) {
+    const a = points[i];
+    const b = points[i + 1];
+    const len = Math.hypot(b.x - a.x, b.y - a.y);
+    routeSegments.push({ a, b, len, start: routeLength, end: routeLength + len });
+    routeLength += len;
+  }
+}
+rebuildRouteGeometry(routePoints);
 
 function sampleRoute(t) {
   const clampedT = Math.max(0, Math.min(1, t));
