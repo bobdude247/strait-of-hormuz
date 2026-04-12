@@ -4,9 +4,13 @@ const ctx = canvas.getContext("2d");
 const hud = {
   timer: document.getElementById("timer"),
   score: document.getElementById("score"),
+  sent: document.getElementById("sent"),
   delivered: document.getElementById("delivered"),
   lost: document.getElementById("lost"),
   burning: document.getElementById("burning"),
+  escortIntercepts: document.getElementById("escort-intercepts"),
+  droneHits: document.getElementById("drone-hits"),
+  missileHits: document.getElementById("missile-hits"),
   status: document.getElementById("status")
 };
 
@@ -467,6 +471,12 @@ const state = {
   liveTrafficSource: "sim",
   trafficNextAt: 0,
   upgradePoints: 0,
+  metrics: {
+    shipsSent: 0,
+    escortIntercepts: 0,
+    droneHits: 0,
+    missileHits: 0
+  },
   nextPowerDelivery: 3,
   upgrades: {
     weaponTier: 1,
@@ -529,6 +539,12 @@ function rotateVec(v, radians) {
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
+}
+
+function signNonZero(value, fallback = 1) {
+  if (value > 0) return 1;
+  if (value < 0) return -1;
+  return fallback >= 0 ? 1 : -1;
 }
 
 function smoothHeading(current, target, rate, dt) {
@@ -768,6 +784,8 @@ function spawnTanker(direction = Math.random() < 0.5 ? 1 : -1) {
     boostTimer: 0,
     stuckTimer: 0,
     recoveryTimer: 0,
+    boundaryFollowTimer: 0,
+    boundarySide: Math.random() < 0.5 ? -1 : 1,
     laneBias: Math.random() < 0.5 ? -1 : 1,
     prevRouteT: t0,
     heading: { ...moorHeading },
@@ -784,6 +802,8 @@ function spawnTanker(direction = Math.random() < 0.5 ? 1 : -1) {
     burn: 0,
     sunk: false
   });
+
+  state.metrics.shipsSent += 1;
 }
 
 // Iranian side attacks only (north side / smaller world Y)
@@ -976,9 +996,13 @@ function update(dt) {
     state.time += dt;
     hud.timer.textContent = `Time: ${Math.max(0, Math.ceil(state.duration - state.time))}`;
     hud.score.textContent = "Score: diagnostic";
+    hud.sent.textContent = "Sent: diagnostic";
     hud.delivered.textContent = "Delivered: diagnostic";
     hud.lost.textContent = "Lost: diagnostic";
     hud.burning.textContent = "Burning: diagnostic";
+    hud.escortIntercepts.textContent = "Escort Intercepts: diagnostic";
+    hud.droneHits.textContent = "Drone Hits: diagnostic";
+    hud.missileHits.textContent = "Missile Hits: diagnostic";
     hud.status.textContent = "Status: MAP-ONLY diagnostic (tiles + corridor overlay only)";
     updateCamera(dt);
     return;
@@ -1027,9 +1051,13 @@ function update(dt) {
   const burningCount = state.ships.filter((s) => s.kind === "tanker" && s.burning && !s.sunk).length;
   hud.timer.textContent = `Time: ${Math.max(0, Math.ceil(state.duration - state.time))}`;
   hud.score.textContent = `Score: ${Math.round(state.score)}`;
+  hud.sent.textContent = `Sent: ${state.metrics.shipsSent}`;
   hud.delivered.textContent = `Delivered: ${state.delivered}`;
   hud.lost.textContent = `Lost: ${state.lost}`;
   hud.burning.textContent = `Burning: ${burningCount}`;
+  hud.escortIntercepts.textContent = `Escort Intercepts: ${state.metrics.escortIntercepts}`;
+  hud.droneHits.textContent = `Drone Hits: ${state.metrics.droneHits}`;
+  hud.missileHits.textContent = `Missile Hits: ${state.metrics.missileHits}`;
   const baseStatus = DEBUG_CORRIDOR_ONLY
     ? "Status: Corridor debug mode (traffic/attacks disabled)"
     : `Status: Running (Shield ${state.alliedShieldCharges}, Traffic ${state.liveTrafficSource.toUpperCase()}:${state.ambientTraffic.length})`;
@@ -1221,6 +1249,16 @@ function updateTankers(dt) {
 
     const laneMax = maxLaneOffsetForRouteT(t.routeT, 4);
     t.targetLaneOffset = clamp(t.targetLaneOffset, -laneMax, laneMax);
+
+    if (t.boundaryFollowTimer > 0) {
+      const followMax = maxLaneOffsetForRouteT(t.routeT, 4);
+      const boundaryTarget = t.boundarySide * Math.max(0, followMax - 1.5);
+      t.targetLaneOffset += (boundaryTarget - t.targetLaneOffset) * Math.min(1, dt * 3.8);
+      const edgeCruise = cruise * 0.72;
+      t.speed += (edgeCruise - t.speed) * dt * 2.4;
+      t.boundaryFollowTimer = Math.max(0, t.boundaryFollowTimer - dt);
+    }
+
     t.laneOffset += (t.targetLaneOffset - t.laneOffset) * dt * 2;
     const moveBoost = t.boostTimer > 0 ? 1.34 : 1;
     t.boostTimer = Math.max(0, t.boostTimer - dt);
@@ -1277,15 +1315,28 @@ function updateTankers(dt) {
     t.x = waterLocked.x;
     t.y = waterLocked.y;
     const nw = nearestOnRoute({ x: t.x, y: t.y });
-    t.routeT = nw.routeT;
+    const prevRouteT = t.prevRouteT ?? nw.routeT;
+    const minForwardStep = (Math.max(5, cruise * 0.1) * dt) / routeLength;
+    const routeForwardDelta = (nw.routeT - prevRouteT) * t.direction;
+    t.routeT = routeForwardDelta < minForwardStep * 0.2
+      ? prevRouteT + t.direction * minForwardStep
+      : nw.routeT;
     t.laneOffset = clamp(nw.signedOffset, -maxLaneOffsetForRouteT(nw.routeT, 4), maxLaneOffsetForRouteT(nw.routeT, 4));
+
+    const edgeMax = maxLaneOffsetForRouteT(t.routeT, 4);
+    const edgeRatio = Math.abs(t.laneOffset) / Math.max(1, edgeMax);
+    if (edgeRatio > 0.93) {
+      t.boundarySide = signNonZero(t.laneOffset, t.boundarySide || t.laneBias || t.direction);
+      t.boundaryFollowTimer = Math.max(t.boundaryFollowTimer, 2.2);
+    } else if (edgeRatio < 0.72 && t.boundaryFollowTimer > 0) {
+      t.boundaryFollowTimer = Math.max(0, t.boundaryFollowTimer - dt * 1.4);
+    }
 
     const desiredHeading = t.direction === 1 ? { ...p.tangent } : { x: -p.tangent.x, y: -p.tangent.y };
     t.heading = smoothHeading(t.heading, desiredHeading, t.turnRate, dt);
     const moved = Math.hypot(t.x - prevX, t.y - prevY);
     t.speedNow = moved / Math.max(0.0001, dt);
 
-    const prevRouteT = t.prevRouteT ?? t.routeT;
     const forwardProgress = (t.routeT - prevRouteT) * t.direction;
     t.prevRouteT = t.routeT;
 
@@ -1295,13 +1346,13 @@ function updateTankers(dt) {
     else t.stuckTimer = Math.max(0, t.stuckTimer - dt * 1.7);
 
     if (t.stuckTimer > 2.2) {
-      const rescueStep = (8 + t.radius * 0.9) * (Math.random() < 0.5 ? -1 : 1) * (t.laneBias || 1);
       const laneMaxRescue = maxLaneOffsetForRouteT(t.routeT, 4);
-      t.targetLaneOffset = clamp(t.targetLaneOffset + rescueStep, -laneMaxRescue, laneMaxRescue);
+      t.boundarySide = signNonZero(t.laneOffset, t.boundarySide || t.laneBias || t.direction);
+      t.targetLaneOffset = t.boundarySide * Math.max(0, laneMaxRescue - 1.5);
+      t.boundaryFollowTimer = Math.max(t.boundaryFollowTimer, 4.0);
       const sizeMul = Math.max(1, t.radius / 7.5);
-      t.boostTimer = Math.max(t.boostTimer, 2.4 * sizeMul);
+      t.boostTimer = Math.max(t.boostTimer, 1.0 * sizeMul);
       t.recoveryTimer = Math.max(t.recoveryTimer, 3.4 * sizeMul);
-      t.laneBias = -t.laneBias;
       t.stuckTimer = 0.7;
       state.message = "Status: Auto-nav recovery active";
       state.messageTimer = 0.8;
@@ -1345,6 +1396,8 @@ function updateThreats(dt) {
 
     if (d < th.target.radius + 7) {
       th.target.hp -= th.damage;
+      if (th.kind === "drone") state.metrics.droneHits += 1;
+      if (th.kind === "missile") state.metrics.missileHits += 1;
       if (!th.target.burning && Math.random() < 0.45 * th.target.fireRisk) {
         th.target.burning = true;
         th.target.burn = Math.max(th.target.burn, 0.25);
@@ -1405,7 +1458,10 @@ function updateProjectiles(dt) {
       p.target.hp -= p.damage;
       p.life = -1;
       state.score += p.kind === "sam" ? 4 : 2;
-      if (p.target.hp <= 0) state.score += p.target.kind === "missile" ? 14 : 8;
+      if (p.target.hp <= 0) {
+        state.score += p.target.kind === "missile" ? 14 : 8;
+        state.metrics.escortIntercepts += 1;
+      }
     }
   }
   state.projectiles = state.projectiles.filter((p) => p.life > 0);
