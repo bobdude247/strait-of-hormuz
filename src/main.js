@@ -47,6 +47,55 @@ function lonLatToWorld(lon, lat) {
   };
 }
 
+// User-provided navigable water polygon (authoritative route zone envelope)
+const navigablePolygonLonLat = [
+  [48.6444508387649, 29.242755529556163],
+  [50.21330325836547, 27.277889180546765],
+  [51.59190804080512, 26.117891195173883],
+  [52.97777239656128, 24.55399358437532],
+  [54.04833341003783, 24.645493809822327],
+  [55.16112843154835, 25.44353780868606],
+  [55.933244020525535, 26.025099986644918],
+  [56.12560859926711, 26.419612648104945],
+  [56.62419220778955, 26.468043561602457],
+  [56.614987659257935, 26.228554190292186],
+  [56.861732843473874, 24.923443387742665],
+  [57.53299317429182, 24.158112926159063],
+  [58.792857016998795, 23.858908055033723],
+  [59.54564928074586, 23.06355354504754],
+  [61.685008516604626, 22.159666526638574],
+  [61.72852646914271, 24.08617552118855],
+  [61.24139848212633, 24.838087356811315],
+  [58.557121749014556, 25.302485495516592],
+  [57.292964933540134, 25.629690185306245],
+  [56.98860901582421, 26.49877378671981],
+  [56.5730090830736, 26.889142215814985],
+  [56.177605550677725, 26.618048798321652],
+  [54.91363964805663, 26.32201118133132],
+  [52.16379046926917, 26.755346596411954],
+  [49.77226456324712, 29.651668157452022],
+  [48.6444508387649, 29.242755529556163]
+];
+const navigablePolygonWorld = navigablePolygonLonLat.map(([lon, lat]) => lonLatToWorld(lon, lat));
+
+function pointInPolygon(point, polygon) {
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const xi = polygon[i].x;
+    const yi = polygon[i].y;
+    const xj = polygon[j].x;
+    const yj = polygon[j].y;
+    const intersects = yi > point.y !== yj > point.y
+      && point.x < ((xj - xi) * (point.y - yi)) / ((yj - yi) || 1e-9) + xi;
+    if (intersects) inside = !inside;
+  }
+  return inside;
+}
+
+function isInsideNavigablePolygon(point) {
+  return pointInPolygon(point, navigablePolygonWorld);
+}
+
 // Long navigable shipping trunk aligned to deep-water centerline from Gulf -> Strait -> Oman Sea
 // Keep points offshore so route/corridor never cuts across Iranian land tiles.
 const trunkRouteLonLat = [
@@ -232,6 +281,7 @@ function getTilePixelClass(worldX, worldY) {
 
 const waterClassCache = new Map();
 function isNavigableWater(point) {
+  if (!isInsideNavigablePolygon(point)) return false;
   const key = `${Math.round(point.x / 4)}:${Math.round(point.y / 4)}`;
   if (waterClassCache.has(key)) return waterClassCache.get(key);
   const cls = getTilePixelClass(point.x, point.y);
@@ -1406,6 +1456,8 @@ function drawSeaCorridor() {
 }
 
 function drawSeaCorridorDebugOverlay() {
+  drawNavigablePolygonOverlay();
+
   ctx.strokeStyle = "rgba(48, 178, 255, 0.62)";
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
@@ -1437,8 +1489,26 @@ function drawSeaCorridorDebugOverlay() {
     ctx.fillRect(state.camera.x + 12, state.camera.y + 66, 450, 26);
     ctx.fillStyle = "#cfefff";
     ctx.font = "13px Segoe UI";
-    ctx.fillText("Corridor Debug View: Ships are restricted to the highlighted blue channel", state.camera.x + 20, state.camera.y + 84);
+    ctx.fillText("Corridor Debug View: Cyan polygon = allowed zone, blue band = route corridor", state.camera.x + 20, state.camera.y + 84);
   }
+}
+
+function drawNavigablePolygonOverlay() {
+  if (!navigablePolygonWorld.length) return;
+  ctx.beginPath();
+  ctx.moveTo(navigablePolygonWorld[0].x, navigablePolygonWorld[0].y);
+  for (let i = 1; i < navigablePolygonWorld.length; i++) {
+    ctx.lineTo(navigablePolygonWorld[i].x, navigablePolygonWorld[i].y);
+  }
+  ctx.closePath();
+
+  ctx.fillStyle = "rgba(92, 240, 255, 0.11)";
+  ctx.fill();
+  ctx.strokeStyle = "rgba(92, 240, 255, 0.9)";
+  ctx.lineWidth = 2;
+  ctx.setLineDash([8, 6]);
+  ctx.stroke();
+  ctx.setLineDash([]);
 }
 
 function drawDiagnosticBanner() {
