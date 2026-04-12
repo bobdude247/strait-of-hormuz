@@ -1746,28 +1746,20 @@ function drawEscort(e) {
 }
 
 function drawTanker(t) {
-  const colors = {
-    "Crude Oil": "#d9b38c",
-    LPG: "#b0d6ff",
-    Helium: "#d7d0ff",
-    Petrochemicals: "#ffb8a8",
-    Urea: "#def2be",
-    Containers: "#c9d0d8"
-  };
   const classStyles = {
-    VLCC: { lengthMul: 2.95, deck: "rgba(245,225,190,0.42)", style: "vlcc" },
-    Suezmax: { lengthMul: 2.6, deck: "rgba(240,230,205,0.40)", style: "suezmax" },
-    Aframax: { lengthMul: 2.35, deck: "rgba(240,230,205,0.36)", style: "aframax" },
-    Container: { lengthMul: 2.4, deck: "rgba(170,210,250,0.33)", style: "container" },
-    LNG: { lengthMul: 2.5, deck: "rgba(210,240,255,0.37)", style: "lng" }
+    VLCC: { lengthMul: 3.05, deck: "rgba(234,242,250,0.34)", style: "tankerEmoji" },
+    Suezmax: { lengthMul: 2.75, deck: "rgba(234,242,250,0.34)", style: "tankerEmoji" },
+    Aframax: { lengthMul: 2.45, deck: "rgba(234,242,250,0.34)", style: "tankerEmoji" },
+    Container: { lengthMul: 2.5, deck: "rgba(234,242,250,0.34)", style: "tankerEmoji" },
+    LNG: { lengthMul: 2.6, deck: "rgba(234,242,250,0.34)", style: "tankerEmoji" }
   };
   const c = classStyles[t.shipClass] || classStyles.Suezmax;
 
   drawShipSprite(t.x, t.y, t.heading, {
     scale: t.radius * 2.0,
     lengthMul: t.lengthMul || c.lengthMul,
-    hullColor: colors[t.cargo] || "#d6d6d6",
-    outlineColor: "#2f2d2a",
+    hullColor: "#2e343a",
+    outlineColor: "#1b2026",
     deckColor: c.deck,
     style: c.style,
     speedNow: t.speedNow || 0
@@ -1957,6 +1949,47 @@ function drawShipSprite(x, y, heading, spec) {
     if (style === "vlcc" || style === "suezmax" || style === "aframax") {
       ctx.fillStyle = "rgba(80,80,80,0.24)";
       ctx.fillRect(stern * 0.45, -beam * 0.08, Math.abs(stern) * 0.7, beam * 0.16);
+    }
+
+    if (style === "tankerEmoji") {
+      // red lower hull stripe
+      ctx.fillStyle = "rgba(235, 36, 28, 0.95)";
+      ctx.fillRect(stern * 0.95, beam * 0.12, Math.abs(stern) * 1.65, beam * 0.34);
+
+      // main superstructure (white block near stern)
+      ctx.fillStyle = "rgba(238, 243, 249, 0.98)";
+      ctx.fillRect(stern * 0.70, -beam * 0.58, scale * 0.88, beam * 0.90);
+      ctx.fillRect(stern * 0.52, -beam * 0.42, scale * 0.38, beam * 0.60);
+
+      // bridge windows
+      ctx.fillStyle = "rgba(20, 132, 208, 0.9)";
+      for (let i = 0; i < 3; i++) {
+        ctx.fillRect(stern * 0.60 + i * scale * 0.17, -beam * 0.24, scale * 0.1, beam * 0.18);
+      }
+
+      // funnel + blue band
+      ctx.fillStyle = "rgba(230, 236, 244, 0.96)";
+      ctx.fillRect(stern * 0.92, -beam * 0.92, scale * 0.34, beam * 0.48);
+      ctx.fillStyle = "rgba(24, 160, 230, 0.92)";
+      ctx.fillRect(stern * 0.92, -beam * 0.78, scale * 0.34, beam * 0.1);
+
+      // deck piping
+      ctx.fillStyle = "rgba(190, 201, 214, 0.78)";
+      ctx.fillRect(stern * 0.34, -beam * 0.16, scale * 1.12, beam * 0.12);
+      ctx.fillRect(stern * 0.08, -beam * 0.24, scale * 0.72, beam * 0.09);
+
+      // oil drop badge
+      ctx.fillStyle = "rgba(255, 205, 24, 0.98)";
+      const dropX = stern * 0.06;
+      const dropY = -beam * 0.02;
+      const dropR = scale * 0.16;
+      ctx.beginPath();
+      ctx.moveTo(dropX, dropY - dropR * 1.25);
+      ctx.quadraticCurveTo(dropX + dropR * 0.85, dropY - dropR * 0.25, dropX + dropR * 0.55, dropY + dropR * 0.52);
+      ctx.quadraticCurveTo(dropX, dropY + dropR * 1.05, dropX - dropR * 0.55, dropY + dropR * 0.52);
+      ctx.quadraticCurveTo(dropX - dropR * 0.85, dropY - dropR * 0.25, dropX, dropY - dropR * 1.25);
+      ctx.closePath();
+      ctx.fill();
     }
   } else {
     // Low zoom fallback silhouette
