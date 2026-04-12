@@ -2187,18 +2187,20 @@ function drawLabels() {
 
   const selected = state.escorts[state.selectedEscort];
   if (selected) {
+    const viewW = canvas.width / state.zoom;
+    const panelW = 350;
     ctx.fillStyle = "rgba(10,20,32,0.75)";
-    ctx.fillRect(state.camera.x + 12, state.camera.y + 66, 350, 72);
+    ctx.fillRect(state.camera.x + viewW - panelW - 16, state.camera.y + 66, panelW, 72);
     ctx.fillStyle = "#dff0ff";
-    ctx.fillText(`Selected Destroyer #${state.selectedEscort + 1}`, state.camera.x + 20, state.camera.y + 88);
+    ctx.fillText(`Selected Destroyer #${state.selectedEscort + 1}`, state.camera.x + viewW - panelW - 8, state.camera.y + 88);
     ctx.fillText(
       `AA: SAM ${Math.max(0, selected.samReload).toFixed(1)}s | CIWS ${Math.max(0, selected.ciwsReload).toFixed(1)}s | Shield ${state.alliedShieldCharges}`,
-      state.camera.x + 20,
+      state.camera.x + viewW - panelW - 8,
       state.camera.y + 109
     );
     ctx.fillText(
       `Upgrades: Pts ${state.upgradePoints} | Fleet T${state.upgrades.fleetTier} | Wpn T${state.upgrades.weaponTier} | DC T${state.upgrades.damageControlTier}`,
-      state.camera.x + 20,
+      state.camera.x + viewW - panelW - 8,
       state.camera.y + 128
     );
   }
