@@ -75,3 +75,40 @@ This repo includes an automated GitHub Pages workflow at `.github/workflows/depl
 ### Expected URL
 
 - `https://bobdude247.github.io/strait-of-hormuz/`
+
+## Live Traffic Enrichment (Optional)
+
+This prototype now supports an **optional ambient AIS-style traffic layer**.
+
+### Important API reality check
+
+- VesselFinder and similar providers typically require paid/commercial plans for API access.
+- Free/public tiers (if any) are usually rate-limited and may not allow direct browser calls.
+- CORS and API key exposure make direct frontend integration unsafe for private keys.
+
+### Recommended architecture
+
+1. Use a small backend proxy (Cloudflare Worker, Vercel function, Netlify function, or tiny Node service).
+2. Proxy fetches traffic from provider API server-side using private API key.
+3. Proxy returns normalized vessel rows to the game frontend.
+
+Example normalized payload:
+
+```json
+[
+  { "name": "Vessel A", "lon": 56.24, "lat": 25.88, "cog": 102, "sog": 11.2, "type": "Tanker" }
+]
+```
+
+### Frontend hook
+
+- Set `window.SOH_TRAFFIC_ENDPOINT` before loading the game script.
+- If unset/unavailable, the game falls back to simulated ambient traffic.
+
+Example:
+
+```html
+<script>
+  window.SOH_TRAFFIC_ENDPOINT = "https://your-proxy.example.com/traffic";
+</script>
+```

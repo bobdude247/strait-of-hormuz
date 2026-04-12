@@ -191,6 +191,10 @@ const state = {
   tollGates: [],
   alliedPickups: [],
   alliedShieldCharges: 0,
+  ambientTraffic: [],
+  liveTrafficEnabled: false,
+  liveTrafficSource: "sim",
+  trafficNextAt: 0,
   upgradePoints: 0,
   nextPowerDelivery: 3,
   upgrades: {
@@ -210,6 +214,10 @@ const navRules = {
   collisionRange: 6.5,
   groundingPenalty: 14
 };
+
+// Optional live traffic hook (set window.SOH_TRAFFIC_ENDPOINT in browser)
+const LIVE_TRAFFIC_ENDPOINT = window.SOH_TRAFFIC_ENDPOINT || null;
+const LIVE_TRAFFIC_REFRESH_SECONDS = 45;
 
 const cargoTypes = [
   { name: "Crude Oil", fireRisk: 1.0, value: 100 },
@@ -311,8 +319,81 @@ function init() {
   state.camera.x = start.x - canvas.width * 0.35;
   state.camera.y = start.y - canvas.height * 0.25;
 
+  setupAmbientTraffic();
+
   bindInput();
   requestAnimationFrame(loop);
+}
+
+function setupAmbientTraffic() {
+  if (LIVE_TRAFFIC_ENDPOINT) {
+    state.liveTrafficEnabled = true;
+    state.liveTrafficSource = "api";
+    state.trafficNextAt = 0;
+    fetchLiveTraffic();
+    return;
+  }
+
+  state.liveTrafficEnabled = false;
+  state.liveTrafficSource = "sim";
+  state.ambientTraffic = [];
+
+  for (let i = 0; i < 24; i++) {
+    const t = Math.random();
+    const p = sampleRoute(t);
+    const off = rng(-70, 70);
+    const direction = Math.random() < 0.5 ? 1 : -1;
+    const heading = direction === 1 ? p.tangent : { x: -p.tangent.x, y: -p.tangent.y };
+    state.ambientTraffic.push({
+      name: `AIS-${1000 + i}`,
+      x: p.x + p.normal.x * off,
+      y: p.y + p.normal.y * off,
+      heading,
+      speed: rng(18, 48),
+      radius: rng(4, 7),
+      lengthMul: rng(2.0, 2.8),
+      cargo: Math.random() < 0.5 ? "Container" : "Aframax",
+      source: "sim"
+    });
+  }
+}
+
+async function fetchLiveTraffic() {
+  if (!LIVE_TRAFFIC_ENDPOINT) return;
+
+  const url = `${LIVE_TRAFFIC_ENDPOINT}?minLon=${MAP_BOUNDS.minLon}&maxLon=${MAP_BOUNDS.maxLon}&minLat=${MAP_BOUNDS.minLat}&maxLat=${MAP_BOUNDS.maxLat}`;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const rows = await res.json();
+    if (!Array.isArray(rows)) throw new Error("invalid payload");
+
+    state.ambientTraffic = rows
+      .filter((r) => Number.isFinite(r.lon) && Number.isFinite(r.lat))
+      .slice(0, 200)
+      .map((r, idx) => {
+        const p = lonLatToWorld(Number(r.lon), Number(r.lat));
+        const cog = Number.isFinite(r.cog) ? r.cog : rng(0, 359);
+        const rad = (cog * Math.PI) / 180;
+        const heading = { x: Math.cos(rad), y: Math.sin(rad) };
+        const speed = Number.isFinite(r.sog) ? Math.max(0, r.sog * 0.9) : rng(14, 42);
+        return {
+          name: r.name || `LIVE-${idx}`,
+          x: p.x,
+          y: p.y,
+          heading,
+          speed,
+          radius: 5.2,
+          lengthMul: 2.35,
+          cargo: r.type || "AIS",
+          source: "api"
+        };
+      });
+  } catch (_e) {
+    if (!state.ambientTraffic.length) {
+      setupAmbientTraffic();
+    }
+  }
 }
 
 function spawnEscort(i, routeT = null) {
@@ -578,6 +659,12 @@ function update(dt) {
     state.spawn.alliedAt = state.time + rng(20, 30);
   }
 
+  if (state.liveTrafficEnabled && state.time >= state.trafficNextAt) {
+    state.trafficNextAt = state.time + LIVE_TRAFFIC_REFRESH_SECONDS;
+    fetchLiveTraffic();
+  }
+
+  updateAmbientTraffic(dt);
   updateEscorts(dt);
   updateTankers(dt);
   updateThreats(dt);
@@ -598,7 +685,20 @@ function update(dt) {
   hud.delivered.textContent = `Delivered: ${state.delivered}`;
   hud.lost.textContent = `Lost: ${state.lost}`;
   hud.burning.textContent = `Burning: ${burningCount}`;
-  hud.status.textContent = state.messageTimer > 0 ? state.message : `Status: Running (Shield ${state.alliedShieldCharges})`;
+  const baseStatus = `Status: Running (Shield ${state.alliedShieldCharges}, Traffic ${state.liveTrafficSource.toUpperCase()}:${state.ambientTraffic.length})`;
+  hud.status.textContent = state.messageTimer > 0 ? state.message : baseStatus;
+}
+
+function updateAmbientTraffic(dt) {
+  for (const v of state.ambientTraffic) {
+    v.x += v.heading.x * v.speed * dt * 0.38;
+    v.y += v.heading.y * v.speed * dt * 0.38;
+
+    if (v.x < -40) v.x = WORLD.width + 40;
+    if (v.x > WORLD.width + 40) v.x = -40;
+    if (v.y < -40) v.y = WORLD.height + 40;
+    if (v.y > WORLD.height + 40) v.y = -40;
+  }
 }
 
 function updateCamera(dt) {
@@ -979,6 +1079,7 @@ function draw() {
   drawSeaCorridor();
   drawTollGates();
   drawAlliedPickups();
+  drawAmbientTraffic();
 
   for (const s of state.ships) {
     if (s.kind === "tanker" && s.sunk) continue;
@@ -996,6 +1097,20 @@ function draw() {
   ctx.fillStyle = "#dce8ff";
   ctx.font = "12px Segoe UI";
   ctx.fillText("Map data © OpenStreetMap contributors", 12, canvas.height - 13);
+}
+
+function drawAmbientTraffic() {
+  for (const v of state.ambientTraffic) {
+    drawShipSprite(v.x, v.y, v.heading, {
+      scale: v.radius * 1.65,
+      lengthMul: v.lengthMul,
+      hullColor: "rgba(194, 208, 228, 0.85)",
+      outlineColor: "rgba(40, 50, 64, 0.8)",
+      deckColor: "rgba(238,245,255,0.3)",
+      style: "ambient",
+      speedNow: v.speed
+    });
+  }
 }
 
 function drawMapTiles() {
