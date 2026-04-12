@@ -1479,13 +1479,21 @@ function drawNavigablePolygonOverlay() {
   }
   ctx.closePath();
 
-  ctx.fillStyle = "rgba(92, 240, 255, 0.11)";
+  ctx.fillStyle = "rgba(255, 0, 200, 0.12)";
   ctx.fill();
-  ctx.strokeStyle = "rgba(92, 240, 255, 0.9)";
-  ctx.lineWidth = 2;
-  ctx.setLineDash([8, 6]);
+  ctx.strokeStyle = "rgba(255, 0, 200, 0.95)";
+  ctx.lineWidth = 4;
+  ctx.setLineDash([14, 8]);
   ctx.stroke();
   ctx.setLineDash([]);
+
+  // Vertex markers so polygon is unmistakably visible over water tiles.
+  ctx.fillStyle = "rgba(255, 255, 255, 0.95)";
+  for (const p of navigablePolygonWorld) {
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 2.5, 0, Math.PI * 2);
+    ctx.fill();
+  }
 }
 
 function drawDiagnosticBanner() {
