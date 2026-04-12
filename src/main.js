@@ -2170,20 +2170,7 @@ function drawProjectile(p) {
 }
 
 function drawLabels() {
-  const west = sampleRoute(0.02);
-  const east = sampleRoute(0.98);
-  // Move location labels inland so they don't obscure the shipping waterway.
-  const westLabelX = west.x - 148;
-  const westLabelY = west.y - 128;
-  const eastLabelX = east.x - 62;
-  const eastLabelY = east.y - 154;
-  ctx.fillStyle = "rgba(10,20,32,0.62)";
-  ctx.fillRect(westLabelX, westLabelY, 216, 24);
-  ctx.fillRect(eastLabelX, eastLabelY, 204, 24);
-  ctx.fillStyle = "#eaf2ff";
-  ctx.font = "14px Segoe UI";
-  ctx.fillText("Kharg / Gulf queue", westLabelX + 20, westLabelY + 17);
-  ctx.fillText("Arabian Sea exit", eastLabelX + 24, eastLabelY + 17);
+  // Location label boxes removed to avoid clipping/occluding NW Gulf map area.
 
   const selected = state.escorts[state.selectedEscort];
   if (selected) {
