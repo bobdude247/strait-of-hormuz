@@ -20,6 +20,9 @@ const TILE_Z = 7;
 const TILE_SIZE = 256;
 const DEBUG_MAP_ONLY = false;
 const DEBUG_CORRIDOR_ONLY = false;
+const DEFAULT_SHOW_POLYGON_OVERLAY = false;
+const DEFAULT_SHOW_TOLL_GATES = false;
+const DEFAULT_SHOW_LOCATION_LABELS = false;
 
 function mercatorX(lon) {
   return (lon + 180) / 360;
@@ -477,6 +480,11 @@ const state = {
     droneHits: 0,
     missileHits: 0
   },
+  ui: {
+    showPolygonOverlay: DEFAULT_SHOW_POLYGON_OVERLAY,
+    showTollGates: DEFAULT_SHOW_TOLL_GATES,
+    showLocationLabels: DEFAULT_SHOW_LOCATION_LABELS
+  },
   nextPowerDelivery: 3,
   upgrades: {
     weaponTier: 1,
@@ -858,6 +866,9 @@ function bindInput() {
     }
 
     if (k === "f") useDamageControl();
+    if (k === "b") state.ui.showPolygonOverlay = !state.ui.showPolygonOverlay;
+    if (k === "g") state.ui.showTollGates = !state.ui.showTollGates;
+    if (k === "n") state.ui.showLocationLabels = !state.ui.showLocationLabels;
     if (["1", "2", "3"].includes(e.key)) state.priority = e.key === "1" ? "missile" : e.key === "2" ? "drone" : "any";
     if (e.key === "+" || e.key === "=") state.zoom = Math.min(2.2, state.zoom + 0.1);
     if (e.key === "-") state.zoom = Math.max(0.6, state.zoom - 0.1);
@@ -1038,7 +1049,7 @@ function update(dt) {
     updateThreats(dt);
     updateWeapons();
     updateProjectiles(dt);
-    updateTollGates(dt);
+    if (state.ui.showTollGates) updateTollGates(dt);
     updateAlliedPickups(dt);
   }
   checkCollisionsAndGrounding(dt);
@@ -1574,7 +1585,7 @@ function draw() {
   }
 
   if (!DEBUG_CORRIDOR_ONLY) {
-    drawTollGates();
+    if (state.ui.showTollGates) drawTollGates();
     drawAlliedPickups();
     drawAmbientTraffic();
   }
@@ -1691,12 +1702,16 @@ function drawSeaCorridor() {
 }
 
 function drawSeaCorridorDebugOverlay() {
-  drawNavigablePolygonOverlay();
+  if (state.ui.showPolygonOverlay) {
+    drawNavigablePolygonOverlay();
+  }
 
-  // Unmistakable proof overlay is active.
-  ctx.fillStyle = "rgba(255, 0, 200, 0.9)";
-  ctx.font = "bold 14px Segoe UI";
-  ctx.fillText(`POLYGON ON (${navigablePolygonWorld.length} pts)`, state.camera.x + 20, state.camera.y + 112);
+  if (state.ui.showPolygonOverlay) {
+    // Unmistakable proof overlay is active.
+    ctx.fillStyle = "rgba(255, 0, 200, 0.9)";
+    ctx.font = "bold 14px Segoe UI";
+    ctx.fillText(`POLYGON ON (${navigablePolygonWorld.length} pts)`, state.camera.x + 20, state.camera.y + 112);
+  }
 
   // Route overlay intentionally disabled during map-only diagnostics.
   // This prevents showing an incorrect dark-blue band while route geometry is being tuned.
@@ -2170,24 +2185,40 @@ function drawProjectile(p) {
 }
 
 function drawLabels() {
-  // Location label boxes removed to avoid clipping/occluding NW Gulf map area.
+  if (state.ui.showLocationLabels) {
+    const west = sampleRoute(0.02);
+    const east = sampleRoute(0.98);
+    // Shifted right so the Gulf-side label doesn't clip off the left edge.
+    const westLabelX = west.x - 68;
+    const westLabelY = west.y - 128;
+    const eastLabelX = east.x - 62;
+    const eastLabelY = east.y - 154;
+    ctx.fillStyle = "rgba(10,20,32,0.62)";
+    ctx.fillRect(westLabelX, westLabelY, 216, 24);
+    ctx.fillRect(eastLabelX, eastLabelY, 204, 24);
+    ctx.fillStyle = "#eaf2ff";
+    ctx.font = "14px Segoe UI";
+    ctx.fillText("Kharg / Gulf queue", westLabelX + 20, westLabelY + 17);
+    ctx.fillText("Arabian Sea exit", eastLabelX + 24, eastLabelY + 17);
+  }
 
   const selected = state.escorts[state.selectedEscort];
   if (selected) {
     const viewW = canvas.width / state.zoom;
     const panelW = 350;
+    const panelX = state.camera.x + viewW - panelW - 6;
     ctx.fillStyle = "rgba(10,20,32,0.75)";
-    ctx.fillRect(state.camera.x + viewW - panelW - 16, state.camera.y + 66, panelW, 72);
+    ctx.fillRect(panelX, state.camera.y + 66, panelW, 72);
     ctx.fillStyle = "#dff0ff";
-    ctx.fillText(`Selected Destroyer #${state.selectedEscort + 1}`, state.camera.x + viewW - panelW - 8, state.camera.y + 88);
+    ctx.fillText(`Selected Destroyer #${state.selectedEscort + 1}`, panelX + 8, state.camera.y + 88);
     ctx.fillText(
       `AA: SAM ${Math.max(0, selected.samReload).toFixed(1)}s | CIWS ${Math.max(0, selected.ciwsReload).toFixed(1)}s | Shield ${state.alliedShieldCharges}`,
-      state.camera.x + viewW - panelW - 8,
+      panelX + 8,
       state.camera.y + 109
     );
     ctx.fillText(
       `Upgrades: Pts ${state.upgradePoints} | Fleet T${state.upgrades.fleetTier} | Wpn T${state.upgrades.weaponTier} | DC T${state.upgrades.damageControlTier}`,
-      state.camera.x + viewW - panelW - 8,
+      panelX + 8,
       state.camera.y + 128
     );
   }
