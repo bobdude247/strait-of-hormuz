@@ -14,8 +14,8 @@ const hud = {
 const MAP_BOUNDS = { minLon: 49.6, maxLon: 59.2, minLat: 23.6, maxLat: 30.1 };
 const TILE_Z = 7;
 const TILE_SIZE = 256;
-const DEBUG_MAP_ONLY = true;
-const DEBUG_CORRIDOR_ONLY = true;
+const DEBUG_MAP_ONLY = false;
+const DEBUG_CORRIDOR_ONLY = false;
 
 function mercatorX(lon) {
   return (lon + 180) / 360;
