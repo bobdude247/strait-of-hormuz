@@ -222,11 +222,11 @@ const cargoTypes = [
 
 // Role/class-based ship set for visual + gameplay differentiation
 const shipClasses = [
-  { key: "Aframax", hp: 120, speed: 74, radius: 6.5, lengthMul: 2.1 },
-  { key: "Suezmax", hp: 170, speed: 66, radius: 8.2, lengthMul: 2.35 },
-  { key: "VLCC", hp: 245, speed: 56, radius: 10.8, lengthMul: 2.7 },
-  { key: "Container", hp: 150, speed: 68, radius: 7.8, lengthMul: 2.25 },
-  { key: "LNG", hp: 165, speed: 64, radius: 8.4, lengthMul: 2.3 }
+  { key: "Aframax", hp: 120, speed: 74, radius: 6.5, lengthMul: 2.1, turnRate: 4.2 },
+  { key: "Suezmax", hp: 170, speed: 66, radius: 8.2, lengthMul: 2.35, turnRate: 3.4 },
+  { key: "VLCC", hp: 245, speed: 56, radius: 10.8, lengthMul: 2.7, turnRate: 2.8 },
+  { key: "Container", hp: 150, speed: 68, radius: 7.8, lengthMul: 2.25, turnRate: 3.8 },
+  { key: "LNG", hp: 165, speed: 64, radius: 8.4, lengthMul: 2.3, turnRate: 3.2 }
 ];
 
 function rng(min, max) {
@@ -235,6 +235,25 @@ function rng(min, max) {
 
 function pick(arr) {
   return arr[(Math.random() * arr.length) | 0];
+}
+
+function normalizeVec(v) {
+  const l = Math.hypot(v.x, v.y) || 1;
+  return { x: v.x / l, y: v.y / l };
+}
+
+function rotateVec(v, radians) {
+  const c = Math.cos(radians);
+  const s = Math.sin(radians);
+  return { x: v.x * c - v.y * s, y: v.x * s + v.y * c };
+}
+
+function smoothHeading(current, target, rate, dt) {
+  const mix = Math.max(0, Math.min(1, rate * dt));
+  return normalizeVec({
+    x: current.x + (target.x - current.x) * mix,
+    y: current.y + (target.y - current.y) * mix
+  });
 }
 
 function grantDeliveryPowerProgress() {
@@ -309,6 +328,8 @@ function spawnEscort(i, routeT = null) {
     maxHp: 200,
     radius: 5,
     speed: 162,
+    turnRate: 6,
+    speedNow: 0,
     waypoint: null,
     samReload: 0,
     ciwsReload: 0,
@@ -336,6 +357,8 @@ function spawnTanker(direction = Math.random() < 0.5 ? 1 : -1) {
 
   const anchor = direction === 1 ? anchorWest : anchorEast;
   const anchorRad = direction === 1 ? ANCHOR_ZONES.west.radius : ANCHOR_ZONES.east.radius;
+  const moorHeadingBase = direction === 1 ? { ...base.tangent } : { x: -base.tangent.x, y: -base.tangent.y };
+  const moorHeading = normalizeVec(rotateVec(moorHeadingBase, rng(-0.22, 0.22)));
 
   state.ships.push({
     kind: "tanker",
@@ -349,8 +372,11 @@ function spawnTanker(direction = Math.random() < 0.5 ? 1 : -1) {
     laneOffset,
     targetLaneOffset: laneOffset,
     speed: full ? shipClass.speed * 0.92 : shipClass.speed * 1.08,
+    turnRate: shipClass.turnRate,
+    speedNow: 0,
     boostTimer: 0,
-    heading: direction === 1 ? { ...base.tangent } : { x: -base.tangent.x, y: -base.tangent.y },
+    heading: { ...moorHeading },
+    moorHeading,
     hp: shipClass.hp,
     maxHp: shipClass.hp,
     radius: shipClass.radius,
@@ -639,7 +665,13 @@ function updateEscorts(dt) {
     const vx = e.x - prev.x;
     const vy = e.y - prev.y;
     const l = Math.hypot(vx, vy);
-    if (l > 0.01) e.heading = { x: vx / l, y: vy / l };
+    if (l > 0.01) {
+      const desired = { x: vx / l, y: vy / l };
+      e.heading = smoothHeading(e.heading, desired, e.turnRate, dt);
+      e.speedNow = l / Math.max(0.0001, dt);
+    } else {
+      e.speedNow *= 0.94;
+    }
 
     e.samReload -= dt;
     e.ciwsReload -= dt;
@@ -700,9 +732,13 @@ function checkCollisionsAndGrounding(dt) {
 function updateTankers(dt) {
   for (const t of state.ships) {
     if (t.kind !== "tanker" || t.sunk) continue;
+    const prevX = t.x;
+    const prevY = t.y;
 
     if (t.staged) {
       t.stageTimer -= dt;
+      t.heading = smoothHeading(t.heading, t.moorHeading, t.turnRate * 0.6, dt);
+      t.speedNow *= 0.9;
       if (t.stageTimer <= 0) {
         t.staged = false;
       } else {
@@ -741,7 +777,10 @@ function updateTankers(dt) {
     const p = sampleRoute(t.routeT);
     t.x = p.x + p.normal.x * t.laneOffset;
     t.y = p.y + p.normal.y * t.laneOffset;
-    t.heading = t.direction === 1 ? { ...p.tangent } : { x: -p.tangent.x, y: -p.tangent.y };
+    const desiredHeading = t.direction === 1 ? { ...p.tangent } : { x: -p.tangent.x, y: -p.tangent.y };
+    t.heading = smoothHeading(t.heading, desiredHeading, t.turnRate, dt);
+    const moved = Math.hypot(t.x - prevX, t.y - prevY);
+    t.speedNow = moved / Math.max(0.0001, dt);
   }
 
   applyTankerSeparation();
@@ -1077,7 +1116,8 @@ function drawEscort(e) {
     hullColor: "#8ed6ff",
     outlineColor: "#1d2a38",
     deckColor: "rgba(255,255,255,0.38)",
-    style: "destroyer"
+    style: "destroyer",
+    speedNow: e.speedNow || 0
   });
 
   if (state.escorts[state.selectedEscort] === e) {
@@ -1122,7 +1162,8 @@ function drawTanker(t) {
     hullColor: colors[t.cargo] || "#d6d6d6",
     outlineColor: "#2f2d2a",
     deckColor: c.deck,
-    style: c.style
+    style: c.style,
+    speedNow: t.speedNow || 0
   });
 
   if (state.selectedTanker === t) {
@@ -1151,26 +1192,40 @@ function drawTanker(t) {
 }
 
 function drawWakeTrail(x, y, heading, length, width, alpha = 0.18) {
+  const speedNorm = Math.max(0.15, Math.min(1.45, arguments[6] ?? 0.8));
+  const len = length * (0.72 + speedNorm * 0.62);
+  const w = width * (0.82 + speedNorm * 0.28);
+  const visAlpha = alpha * (0.75 + Math.min(1.2, state.zoom) * 0.22);
+
   const backX = -heading.x;
   const backY = -heading.y;
   const nx = -backY;
   const ny = backX;
 
-  ctx.fillStyle = `rgba(220,245,255,${alpha})`;
+  ctx.fillStyle = `rgba(220,245,255,${visAlpha})`;
   ctx.beginPath();
-  ctx.moveTo(x + nx * width, y + ny * width);
-  ctx.lineTo(x - nx * width, y - ny * width);
-  ctx.lineTo(x + backX * length - nx * (width * 0.25), y + backY * length - ny * (width * 0.25));
-  ctx.lineTo(x + backX * length + nx * (width * 0.25), y + backY * length + ny * (width * 0.25));
+  ctx.moveTo(x + nx * w, y + ny * w);
+  ctx.lineTo(x - nx * w, y - ny * w);
+  ctx.lineTo(x + backX * len - nx * (w * 0.25), y + backY * len - ny * (w * 0.25));
+  ctx.lineTo(x + backX * len + nx * (w * 0.25), y + backY * len + ny * (w * 0.25));
   ctx.closePath();
   ctx.fill();
 }
 
 function drawShipSprite(x, y, heading, spec) {
-  const { scale, lengthMul, hullColor, outlineColor, deckColor, style } = spec;
+  const { scale, lengthMul, hullColor, outlineColor, deckColor, style, speedNow = 0 } = spec;
   const lod = state.zoom;
+  const speedNorm = Math.min(1.4, speedNow / 130);
 
-  drawWakeTrail(x - heading.x * scale * 0.9, y - heading.y * scale * 0.9, heading, scale * (2.8 + lengthMul * 0.5), scale * 0.5, 0.14);
+  drawWakeTrail(
+    x - heading.x * scale * 0.9,
+    y - heading.y * scale * 0.9,
+    heading,
+    scale * (2.8 + lengthMul * 0.5),
+    scale * 0.5,
+    0.14,
+    speedNorm
+  );
 
   const a = Math.atan2(heading.y, heading.x);
   ctx.save();
@@ -1214,6 +1269,16 @@ function drawShipSprite(x, y, heading, spec) {
       ctx.fillStyle = "rgba(240,250,255,0.45)";
       ctx.fillRect(stern * 0.28, -beam * 0.18, scale * 0.55, beam * 0.36);
       ctx.fillRect(stern * 0.02, -beam * 0.14, scale * 0.25, beam * 0.28);
+    }
+
+    if (style === "lng") {
+      ctx.fillStyle = "rgba(240,250,255,0.46)";
+      for (let i = 0; i < 3; i++) {
+        const dx = stern * 0.45 + i * scale * 0.45;
+        ctx.beginPath();
+        ctx.arc(dx, 0, scale * 0.16, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
 
     if (style === "vlcc" || style === "suezmax" || style === "aframax") {
