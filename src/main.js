@@ -59,21 +59,21 @@ const trunkRouteLonLat = [
   [53.24, 25.86],
   [53.90, 25.74],
   [54.54, 25.65],
-  [55.08, 25.58],
-  [55.56, 25.53],
-  [55.94, 25.50],
-  [56.22, 25.46],
-  [56.40, 25.39],
-  [56.56, 25.31],
-  [56.74, 25.22],
-  [56.96, 25.12],
-  [57.22, 25.01],
-  [57.52, 24.91],
-  [57.86, 24.82],
-  [58.22, 24.74],
-  [58.56, 24.67],
-  [58.84, 24.61],
-  [59.02, 24.56]
+  [55.08, 25.59],
+  [55.56, 25.62],
+  [55.94, 25.64],
+  [56.20, 25.70],
+  [56.36, 25.78],
+  [56.50, 25.87],
+  [56.66, 25.97],
+  [56.86, 26.01],
+  [57.12, 25.95],
+  [57.42, 25.80],
+  [57.76, 25.59],
+  [58.14, 25.37],
+  [58.50, 25.18],
+  [58.80, 25.02],
+  [59.02, 24.92]
 ];
 const routePoints = trunkRouteLonLat.map(([lon, lat]) => lonLatToWorld(lon, lat));
 
@@ -153,11 +153,11 @@ function nearestOnRoute(point) {
 // Wider at the Gulf/Oman ends, narrower at the Strait pinch point.
 // Keep corridor conservative so traffic does not spill onto nearby coasts.
 // Wide at both ends, but much tighter through the Strait pinch.
-const corridorBaseWest = 42;
-const corridorBaseEast = 34;
-const straitPinchT = 0.69;
-const straitPinchSigma = 0.085;
-const straitPinchDepth = 10;
+const corridorBaseWest = 38;
+const corridorBaseEast = 30;
+const straitPinchT = 0.70;
+const straitPinchSigma = 0.055;
+const straitPinchDepth = 22;
 
 const ANCHOR_ZONES = {
   west: { lon: 55.35, lat: 25.92, radius: 42, entryT: 0.60 },
@@ -171,7 +171,7 @@ function corridorHalfWidthAtT(routeT) {
   const t = Math.max(0, Math.min(1, routeT));
   const base = corridorBaseWest + (corridorBaseEast - corridorBaseWest) * t;
   const pinch = straitPinchDepth * Math.exp(-((t - straitPinchT) ** 2) / (2 * straitPinchSigma * straitPinchSigma));
-  return Math.max(22, base - pinch);
+  return Math.max(10, base - pinch);
 }
 
 function maxLaneOffsetForRouteT(routeT, margin = 4) {
