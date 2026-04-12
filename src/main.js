@@ -122,7 +122,8 @@ const trunkRouteLonLat = [
   [58.14, 25.37],
   [58.50, 25.18],
   [58.80, 25.02],
-  [59.02, 24.92]
+  [59.02, 24.92],
+  [59.55, 24.68]
 ];
 const routePoints = trunkRouteLonLat.map(([lon, lat]) => lonLatToWorld(lon, lat));
 
@@ -983,12 +984,10 @@ function updateEscorts(dt) {
 
     const c = clampToCorridor({ x: e.x, y: e.y }, 5);
     const cw = clampPointToWater(c, prev, 180);
-    const distFromSafe = nearestOnRoute({ x: e.x, y: e.y }).dist;
     e.x = cw.x;
     e.y = cw.y;
 
-    const localWidth = corridorHalfWidthAtT(nearestOnRoute({ x: e.x, y: e.y }).routeT);
-    if (distFromSafe > localWidth * 0.9) {
+    if (!isNavigableWater({ x: e.x, y: e.y })) {
       e.hp = Math.max(20, e.hp - navRules.groundingPenalty * dt);
     }
     const vx = e.x - prev.x;
@@ -1047,9 +1046,7 @@ function checkCollisionsAndGrounding(dt) {
   }
 
   for (const s of active) {
-    const n = nearestOnRoute({ x: s.x, y: s.y });
-    const localWidth = corridorHalfWidthAtT(n.routeT);
-    if (n.dist > localWidth + 3) {
+    if (!isNavigableWater({ x: s.x, y: s.y })) {
       if (s.kind === "tanker") {
         s.hp -= navRules.groundingPenalty * dt;
         if (!s.burning && Math.random() < 0.03) {
@@ -1102,7 +1099,9 @@ function updateTankers(dt) {
       continue;
     }
 
-    if (t.routeT > 1.02 || t.routeT < -0.02) {
+    const exitedEast = t.direction === 1 && t.x > WORLD.width + 24;
+    const exitedWest = t.direction === -1 && t.x < -24;
+    if (t.routeT > 1.08 || t.routeT < -0.08 || exitedEast || exitedWest) {
       t.sunk = true;
       state.delivered += 1;
       state.score += 45 + t.cargoValue;
