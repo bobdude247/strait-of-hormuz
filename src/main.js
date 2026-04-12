@@ -1456,8 +1456,6 @@ function drawSeaCorridor() {
 }
 
 function drawSeaCorridorDebugOverlay() {
-  drawNavigablePolygonOverlay();
-
   ctx.strokeStyle = "rgba(48, 178, 255, 0.62)";
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
@@ -1489,26 +1487,8 @@ function drawSeaCorridorDebugOverlay() {
     ctx.fillRect(state.camera.x + 12, state.camera.y + 66, 450, 26);
     ctx.fillStyle = "#cfefff";
     ctx.font = "13px Segoe UI";
-    ctx.fillText("Corridor Debug View: Cyan polygon = allowed zone, blue band = route corridor", state.camera.x + 20, state.camera.y + 84);
+    ctx.fillText("Corridor Debug View: Blue band = route corridor", state.camera.x + 20, state.camera.y + 84);
   }
-}
-
-function drawNavigablePolygonOverlay() {
-  if (!navigablePolygonWorld.length) return;
-  ctx.beginPath();
-  ctx.moveTo(navigablePolygonWorld[0].x, navigablePolygonWorld[0].y);
-  for (let i = 1; i < navigablePolygonWorld.length; i++) {
-    ctx.lineTo(navigablePolygonWorld[i].x, navigablePolygonWorld[i].y);
-  }
-  ctx.closePath();
-
-  ctx.fillStyle = "rgba(92, 240, 255, 0.11)";
-  ctx.fill();
-  ctx.strokeStyle = "rgba(92, 240, 255, 0.9)";
-  ctx.lineWidth = 2;
-  ctx.setLineDash([8, 6]);
-  ctx.stroke();
-  ctx.setLineDash([]);
 }
 
 function drawDiagnosticBanner() {
