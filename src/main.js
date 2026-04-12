@@ -1458,6 +1458,11 @@ function drawSeaCorridor() {
 function drawSeaCorridorDebugOverlay() {
   drawNavigablePolygonOverlay();
 
+  // Unmistakable proof overlay is active.
+  ctx.fillStyle = "rgba(255, 0, 200, 0.9)";
+  ctx.font = "bold 14px Segoe UI";
+  ctx.fillText(`POLYGON ON (${navigablePolygonWorld.length} pts)`, state.camera.x + 20, state.camera.y + 112);
+
   // Route overlay intentionally disabled during map-only diagnostics.
   // This prevents showing an incorrect dark-blue band while route geometry is being tuned.
 
@@ -1472,6 +1477,8 @@ function drawSeaCorridorDebugOverlay() {
 
 function drawNavigablePolygonOverlay() {
   if (!navigablePolygonWorld.length) return;
+  ctx.save();
+  ctx.globalCompositeOperation = "source-over";
   ctx.beginPath();
   ctx.moveTo(navigablePolygonWorld[0].x, navigablePolygonWorld[0].y);
   for (let i = 1; i < navigablePolygonWorld.length; i++) {
@@ -1494,6 +1501,7 @@ function drawNavigablePolygonOverlay() {
     ctx.arc(p.x, p.y, 2.5, 0, Math.PI * 2);
     ctx.fill();
   }
+  ctx.restore();
 }
 
 function drawDiagnosticBanner() {
