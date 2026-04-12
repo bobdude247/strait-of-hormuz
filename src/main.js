@@ -14,6 +14,8 @@ const hud = {
 const MAP_BOUNDS = { minLon: 49.6, maxLon: 59.2, minLat: 23.6, maxLat: 30.1 };
 const TILE_Z = 7;
 const TILE_SIZE = 256;
+const DEBUG_MAP_ONLY = true;
+const DEBUG_CORRIDOR_ONLY = true;
 
 function mercatorX(lon) {
   return (lon + 180) / 360;
@@ -46,25 +48,32 @@ function lonLatToWorld(lon, lat) {
 }
 
 // Long navigable shipping trunk aligned to deep-water centerline from Gulf -> Strait -> Oman Sea
+// Keep points offshore so route/corridor never cuts across Iranian land tiles.
 const trunkRouteLonLat = [
-  [50.60, 28.95],
-  [51.20, 28.70],
-  [52.00, 28.30],
-  [52.85, 27.90],
-  [53.70, 27.50],
-  [54.45, 27.10],
-  [55.10, 26.78],
-  [55.55, 26.50],
-  [55.95, 26.24],
-  [56.25, 26.12],
-  [56.50, 26.20],
-  [56.67, 26.34],
-  [56.76, 26.10],
-  [56.88, 25.82],
-  [57.18, 25.57],
-  [57.60, 25.30],
-  [58.15, 24.98],
-  [58.85, 24.62]
+  [50.22, 27.62],
+  [50.64, 27.42],
+  [51.12, 27.24],
+  [51.66, 27.02],
+  [52.26, 26.78],
+  [52.90, 26.57],
+  [53.56, 26.39],
+  [54.16, 26.26],
+  [54.72, 26.16],
+  [55.20, 26.09],
+  [55.62, 26.02],
+  [55.92, 25.96],
+  [56.18, 25.91],
+  [56.36, 25.89],
+  [56.52, 25.83],
+  [56.70, 25.74],
+  [56.90, 25.65],
+  [57.14, 25.55],
+  [57.42, 25.44],
+  [57.74, 25.33],
+  [58.10, 25.23],
+  [58.46, 25.13],
+  [58.78, 25.04],
+  [59.02, 24.94]
 ];
 const routePoints = trunkRouteLonLat.map(([lon, lat]) => lonLatToWorld(lon, lat));
 
@@ -140,8 +149,15 @@ function nearestOnRoute(point) {
   return best;
 }
 
-// Water-rule proxy: ships are constrained to this navigable corridor around route centerline.
-const corridorHalfWidth = 22;
+// Water-rule proxy: ships are constrained to a tapered navigable corridor.
+// Wider at the Gulf/Oman ends, narrower at the Strait pinch point.
+// Keep corridor conservative so traffic does not spill onto nearby coasts.
+// Wide at both ends, but much tighter through the Strait pinch.
+const corridorBaseWest = 16;
+const corridorBaseEast = 15;
+const straitPinchT = 0.69;
+const straitPinchSigma = 0.085;
+const straitPinchDepth = 7;
 
 const ANCHOR_ZONES = {
   west: { lon: 55.35, lat: 25.92, radius: 42, entryT: 0.60 },
@@ -150,11 +166,103 @@ const ANCHOR_ZONES = {
 
 const anchorWest = lonLatToWorld(ANCHOR_ZONES.west.lon, ANCHOR_ZONES.west.lat);
 const anchorEast = lonLatToWorld(ANCHOR_ZONES.east.lon, ANCHOR_ZONES.east.lat);
+
+function corridorHalfWidthAtT(routeT) {
+  const t = Math.max(0, Math.min(1, routeT));
+  const base = corridorBaseWest + (corridorBaseEast - corridorBaseWest) * t;
+  const pinch = straitPinchDepth * Math.exp(-((t - straitPinchT) ** 2) / (2 * straitPinchSigma * straitPinchSigma));
+  return Math.max(11, base - pinch);
+}
+
+function maxLaneOffsetForRouteT(routeT, margin = 4) {
+  return Math.max(5, corridorHalfWidthAtT(routeT) - margin);
+}
+
 function clampToCorridor(point, margin = 6) {
   const n = nearestOnRoute(point);
-  const maxOffset = corridorHalfWidth - margin;
+  const maxOffset = maxLaneOffsetForRouteT(n.routeT, margin);
   const off = Math.max(-maxOffset, Math.min(maxOffset, n.signedOffset));
   return { x: n.x + n.normal.x * off, y: n.y + n.normal.y * off };
+}
+
+function worldToTileSample(worldX, worldY, z = TILE_Z) {
+  const scale = 2 ** z;
+  const nx = projBounds.minX + (worldX / WORLD.width) * (projBounds.maxX - projBounds.minX);
+  const ny = projBounds.minY + (worldY / WORLD.height) * (projBounds.maxY - projBounds.minY);
+  const tileFX = nx * scale;
+  const tileFY = ny * scale;
+  const tx = Math.floor(tileFX);
+  const ty = Math.floor(tileFY);
+  const px = Math.max(0, Math.min(TILE_SIZE - 1, Math.floor((tileFX - tx) * TILE_SIZE)));
+  const py = Math.max(0, Math.min(TILE_SIZE - 1, Math.floor((tileFY - ty) * TILE_SIZE)));
+  return { tx, ty, px, py };
+}
+
+function classifyOSMWater(r, g, b) {
+  // OSM standard water tends to be light blue/cyan (e.g. #aad3df variants).
+  const blueDominant = b >= g - 6 && g >= r - 4;
+  const brightEnough = r >= 88 && g >= 118 && b >= 132;
+  const cyanTilt = (g - r) >= 12 && (b - r) >= 22;
+  return blueDominant && brightEnough && cyanTilt;
+}
+
+function getTilePixelClass(worldX, worldY) {
+  if (worldX < 0 || worldY < 0 || worldX > WORLD.width || worldY > WORLD.height) return "land";
+
+  const { tx, ty, px, py } = worldToTileSample(worldX, worldY, TILE_Z);
+  const rec = getTile(TILE_Z, tx, ty);
+  if (!rec.loaded) return "unknown";
+  if (rec.pixelAccess === false) return "unknown";
+
+  try {
+    if (!rec.pixelCanvas) {
+      rec.pixelCanvas = document.createElement("canvas");
+      rec.pixelCanvas.width = TILE_SIZE;
+      rec.pixelCanvas.height = TILE_SIZE;
+      rec.pixelCtx = rec.pixelCanvas.getContext("2d", { willReadFrequently: true });
+      rec.pixelCtx.drawImage(rec.img, 0, 0, TILE_SIZE, TILE_SIZE);
+    }
+    const data = rec.pixelCtx.getImageData(px, py, 1, 1).data;
+    return classifyOSMWater(data[0], data[1], data[2]) ? "water" : "land";
+  } catch (_e) {
+    rec.pixelAccess = false;
+    return "unknown";
+  }
+}
+
+const waterClassCache = new Map();
+function isNavigableWater(point) {
+  const key = `${Math.round(point.x / 4)}:${Math.round(point.y / 4)}`;
+  if (waterClassCache.has(key)) return waterClassCache.get(key);
+  const cls = getTilePixelClass(point.x, point.y);
+  // Allow movement while tile pixels are not yet readable/loaded.
+  const ok = cls !== "land";
+  waterClassCache.set(key, ok);
+  return ok;
+}
+
+function projectToNearestWater(point, maxRadius = 160, ringStep = 8) {
+  if (isNavigableWater(point)) return { x: point.x, y: point.y };
+
+  let best = null;
+  for (let r = ringStep; r <= maxRadius; r += ringStep) {
+    const steps = Math.max(16, Math.ceil((Math.PI * 2 * r) / 16));
+    for (let i = 0; i < steps; i++) {
+      const a = (i / steps) * Math.PI * 2;
+      const c = { x: point.x + Math.cos(a) * r, y: point.y + Math.sin(a) * r };
+      if (!isNavigableWater(c)) continue;
+      const d = Math.hypot(c.x - point.x, c.y - point.y);
+      if (!best || d < best.d) best = { x: c.x, y: c.y, d };
+    }
+    if (best) break;
+  }
+  return best ? { x: best.x, y: best.y } : null;
+}
+
+function clampPointToWater(point, fallback = null, maxRadius = 160) {
+  const snapped = projectToNearestWater(point, maxRadius, 8);
+  if (snapped) return snapped;
+  return fallback ? { x: fallback.x, y: fallback.y } : { x: point.x, y: point.y };
 }
 
 const tileCache = new Map();
@@ -164,7 +272,7 @@ function getTile(z, x, y) {
   const img = new Image();
   img.crossOrigin = "anonymous";
   img.src = `https://tile.openstreetmap.org/${z}/${x}/${y}.png`;
-  const rec = { img, loaded: false };
+  const rec = { img, loaded: false, pixelAccess: null, pixelCanvas: null, pixelCtx: null };
   img.onload = () => (rec.loaded = true);
   tileCache.set(key, rec);
   return rec;
@@ -256,6 +364,10 @@ function rotateVec(v, radians) {
   return { x: v.x * c - v.y * s, y: v.x * s + v.y * c };
 }
 
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
 function smoothHeading(current, target, rate, dt) {
   const mix = Math.max(0, Math.min(1, rate * dt));
   return normalizeVec({
@@ -307,19 +419,31 @@ function spendUpgrade(type) {
 }
 
 function init() {
-  for (let i = 0; i < 3; i++) spawnEscort(i);
-  for (let i = 0; i < 9; i++) spawnTanker(i % 2 === 0 ? 1 : -1);
+  if (!DEBUG_MAP_ONLY) {
+    for (let i = 0; i < 3; i++) spawnEscort(i);
+    for (let i = 0; i < 9; i++) spawnTanker(i % 2 === 0 ? 1 : -1);
+  }
 
-  state.tollGates = [0.18, 0.42, 0.67, 0.86].map((t) => {
-    const p = sampleRoute(t);
-    return { x: p.x, y: p.y, radius: 11, cooldown: 0 };
-  });
+  state.tollGates = DEBUG_MAP_ONLY || DEBUG_CORRIDOR_ONLY
+    ? []
+    : [0.18, 0.42, 0.67, 0.86].map((t) => {
+        const p = sampleRoute(t);
+        return { x: p.x, y: p.y, radius: 11, cooldown: 0 };
+      });
 
   const start = sampleRoute(0.1);
   state.camera.x = start.x - canvas.width * 0.35;
   state.camera.y = start.y - canvas.height * 0.25;
 
-  setupAmbientTraffic();
+  if (DEBUG_MAP_ONLY || DEBUG_CORRIDOR_ONLY) {
+    state.ambientTraffic = [];
+    state.threats = [];
+    state.projectiles = [];
+    state.alliedPickups = [];
+    state.message = DEBUG_MAP_ONLY ? "Status: MAP-ONLY diagnostic mode" : "Status: Corridor debug mode";
+  } else {
+    setupAmbientTraffic();
+  }
 
   bindInput();
   requestAnimationFrame(loop);
@@ -341,20 +465,28 @@ function setupAmbientTraffic() {
   for (let i = 0; i < 24; i++) {
     const t = Math.random();
     const p = sampleRoute(t);
-    const off = rng(-70, 70);
+    const laneMax = maxLaneOffsetForRouteT(t, 3);
+    const off = rng(-laneMax, laneMax);
     const direction = Math.random() < 0.5 ? 1 : -1;
     const heading = direction === 1 ? p.tangent : { x: -p.tangent.x, y: -p.tangent.y };
-    state.ambientTraffic.push({
+    const seed = {
       name: `AIS-${1000 + i}`,
       x: p.x + p.normal.x * off,
       y: p.y + p.normal.y * off,
+      routeT: t,
+      laneOffset: off,
+      direction,
       heading,
       speed: rng(18, 48),
       radius: rng(4, 7),
       lengthMul: rng(2.0, 2.8),
       cargo: Math.random() < 0.5 ? "Container" : "Aframax",
       source: "sim"
-    });
+    };
+    const water = clampPointToWater({ x: seed.x, y: seed.y }, p, 180);
+    seed.x = water.x;
+    seed.y = water.y;
+    state.ambientTraffic.push(seed);
   }
 }
 
@@ -373,14 +505,23 @@ async function fetchLiveTraffic() {
       .slice(0, 200)
       .map((r, idx) => {
         const p = lonLatToWorld(Number(r.lon), Number(r.lat));
+        const n = nearestOnRoute(p);
+        const maxLane = maxLaneOffsetForRouteT(n.routeT, 3);
+        if (n.dist > maxLane + 10) return null;
+
         const cog = Number.isFinite(r.cog) ? r.cog : rng(0, 359);
         const rad = (cog * Math.PI) / 180;
         const heading = { x: Math.cos(rad), y: Math.sin(rad) };
+        const dirDot = heading.x * n.tangent.x + heading.y * n.tangent.y;
+        const direction = dirDot >= 0 ? 1 : -1;
         const speed = Number.isFinite(r.sog) ? Math.max(0, r.sog * 0.9) : rng(14, 42);
         return {
           name: r.name || `LIVE-${idx}`,
-          x: p.x,
-          y: p.y,
+          x: n.x + n.normal.x * Math.max(-maxLane, Math.min(maxLane, n.signedOffset)),
+          y: n.y + n.normal.y * Math.max(-maxLane, Math.min(maxLane, n.signedOffset)),
+          routeT: n.routeT,
+          laneOffset: Math.max(-maxLane, Math.min(maxLane, n.signedOffset)),
+          direction,
           heading,
           speed,
           radius: 5.2,
@@ -388,7 +529,8 @@ async function fetchLiveTraffic() {
           cargo: r.type || "AIS",
           source: "api"
         };
-      });
+      })
+      .filter(Boolean);
   } catch (_e) {
     if (!state.ambientTraffic.length) {
       setupAmbientTraffic();
@@ -398,10 +540,11 @@ async function fetchLiveTraffic() {
 
 function spawnEscort(i, routeT = null) {
   const base = sampleRoute(routeT ?? (0.08 + i * 0.015));
+  const spawnPos = clampPointToWater({ x: base.x + base.normal.x * (18 + i * 14), y: base.y + base.normal.y * (18 + i * 14) }, base, 180);
   const e = {
     kind: "escort",
-    x: base.x + base.normal.x * (18 + i * 14),
-    y: base.y + base.normal.y * (18 + i * 14),
+    x: spawnPos.x,
+    y: spawnPos.y,
     vx: 0,
     vy: 0,
     heading: { x: 1, y: 0 },
@@ -433,13 +576,16 @@ function spawnTanker(direction = Math.random() < 0.5 ? 1 : -1) {
     : direction === 1
       ? rng(0, 0.04)
       : rng(0.96, 1);
-  const laneOffset = rng(-28, 28);
+  const laneMaxAtSpawn = maxLaneOffsetForRouteT(t0, 4);
+  const laneOffset = rng(-laneMaxAtSpawn, laneMaxAtSpawn);
   const base = sampleRoute(t0);
 
   const anchor = direction === 1 ? anchorWest : anchorEast;
   const anchorRad = direction === 1 ? ANCHOR_ZONES.west.radius : ANCHOR_ZONES.east.radius;
   const moorHeadingBase = direction === 1 ? { ...base.tangent } : { x: -base.tangent.x, y: -base.tangent.y };
   const moorHeading = normalizeVec(rotateVec(moorHeadingBase, rng(-0.22, 0.22)));
+
+  const spawnPos = clampPointToWater({ x: base.x + base.normal.x * laneOffset, y: base.y + base.normal.y * laneOffset }, base, 220);
 
   state.ships.push({
     kind: "tanker",
@@ -462,8 +608,8 @@ function spawnTanker(direction = Math.random() < 0.5 ? 1 : -1) {
     maxHp: shipClass.hp,
     radius: shipClass.radius,
     lengthMul: shipClass.lengthMul,
-    x: stageFirst ? anchor.x + rng(-anchorRad, anchorRad) : base.x + base.normal.x * laneOffset,
-    y: stageFirst ? anchor.y + rng(-anchorRad, anchorRad) : base.y + base.normal.y * laneOffset,
+    x: spawnPos.x,
+    y: spawnPos.y,
     staged: stageFirst,
     stageTimer: stageFirst ? rng(9, 20) : 0,
     burning: false,
@@ -532,8 +678,9 @@ function bindInput() {
 
     const t = state.selectedTanker;
     if (t && !t.sunk) {
-      if (k === "u") t.targetLaneOffset = Math.max(-34, t.targetLaneOffset - 12);
-      if (k === "o") t.targetLaneOffset = Math.min(34, t.targetLaneOffset + 12);
+      const laneMax = maxLaneOffsetForRouteT(t.routeT, 4);
+      if (k === "u") t.targetLaneOffset = Math.max(-laneMax, t.targetLaneOffset - 12);
+      if (k === "o") t.targetLaneOffset = Math.min(laneMax, t.targetLaneOffset + 12);
     }
   });
 
@@ -614,12 +761,16 @@ function handleTap(screenX, screenY) {
 
   if (state.selectedTanker && !state.selectedTanker.sunk) {
     const n = nearestOnRoute(p);
-    state.selectedTanker.targetLaneOffset = Math.max(-34, Math.min(34, n.signedOffset));
+    const laneMax = maxLaneOffsetForRouteT(n.routeT, 4);
+    state.selectedTanker.targetLaneOffset = Math.max(-laneMax, Math.min(laneMax, n.signedOffset));
     return;
   }
 
   const esc = state.escorts[state.selectedEscort];
-  if (esc) esc.waypoint = clampToCorridor(p, 6);
+  if (esc) {
+    const c = clampToCorridor(p, 6);
+    esc.waypoint = clampPointToWater(c, { x: esc.x, y: esc.y }, 220);
+  }
 }
 
 function useDamageControl(forced = null) {
@@ -641,37 +792,56 @@ function useDamageControl(forced = null) {
 function update(dt) {
   if (state.ended) return;
 
+  if (DEBUG_MAP_ONLY) {
+    state.ambientTraffic = [];
+    state.threats = [];
+    state.projectiles = [];
+    state.alliedPickups = [];
+    state.tollGates = [];
+    state.time += dt;
+    hud.timer.textContent = `Time: ${Math.max(0, Math.ceil(state.duration - state.time))}`;
+    hud.score.textContent = "Score: diagnostic";
+    hud.delivered.textContent = "Delivered: diagnostic";
+    hud.lost.textContent = "Lost: diagnostic";
+    hud.burning.textContent = "Burning: diagnostic";
+    hud.status.textContent = "Status: MAP-ONLY diagnostic (tiles + corridor overlay only)";
+    updateCamera(dt);
+    return;
+  }
+
   state.time += dt;
   state.messageTimer = Math.max(0, state.messageTimer - dt);
 
   updateCamera(dt);
 
-  if (state.time > state.spawn.tankerAt) {
+  if (!DEBUG_CORRIDOR_ONLY && state.time > state.spawn.tankerAt) {
     spawnTanker(Math.random() < 0.5 ? 1 : -1);
     state.spawn.tankerAt = state.time + rng(2.4, 4.5);
   }
-  if (state.time > state.spawn.threatAt) {
+  if (!DEBUG_CORRIDOR_ONLY && state.time > state.spawn.threatAt) {
     spawnThreat();
     state.spawn.threatAt = state.time + rng(1.0, 2.0);
   }
-  if (state.time > state.spawn.alliedAt) {
+  if (!DEBUG_CORRIDOR_ONLY && state.time > state.spawn.alliedAt) {
     spawnAlliedPickup();
     state.spawn.alliedAt = state.time + rng(20, 30);
   }
 
-  if (state.liveTrafficEnabled && state.time >= state.trafficNextAt) {
+  if (!DEBUG_CORRIDOR_ONLY && state.liveTrafficEnabled && state.time >= state.trafficNextAt) {
     state.trafficNextAt = state.time + LIVE_TRAFFIC_REFRESH_SECONDS;
     fetchLiveTraffic();
   }
 
-  updateAmbientTraffic(dt);
+  if (!DEBUG_CORRIDOR_ONLY) updateAmbientTraffic(dt);
   updateEscorts(dt);
   updateTankers(dt);
-  updateThreats(dt);
-  updateWeapons();
-  updateProjectiles(dt);
-  updateTollGates(dt);
-  updateAlliedPickups(dt);
+  if (!DEBUG_CORRIDOR_ONLY) {
+    updateThreats(dt);
+    updateWeapons();
+    updateProjectiles(dt);
+    updateTollGates(dt);
+    updateAlliedPickups(dt);
+  }
   checkCollisionsAndGrounding(dt);
 
   if (state.time >= state.duration) {
@@ -685,19 +855,26 @@ function update(dt) {
   hud.delivered.textContent = `Delivered: ${state.delivered}`;
   hud.lost.textContent = `Lost: ${state.lost}`;
   hud.burning.textContent = `Burning: ${burningCount}`;
-  const baseStatus = `Status: Running (Shield ${state.alliedShieldCharges}, Traffic ${state.liveTrafficSource.toUpperCase()}:${state.ambientTraffic.length})`;
+  const baseStatus = DEBUG_CORRIDOR_ONLY
+    ? "Status: Corridor debug mode (traffic/attacks disabled)"
+    : `Status: Running (Shield ${state.alliedShieldCharges}, Traffic ${state.liveTrafficSource.toUpperCase()}:${state.ambientTraffic.length})`;
   hud.status.textContent = state.messageTimer > 0 ? state.message : baseStatus;
 }
 
 function updateAmbientTraffic(dt) {
   for (const v of state.ambientTraffic) {
-    v.x += v.heading.x * v.speed * dt * 0.38;
-    v.y += v.heading.y * v.speed * dt * 0.38;
+    v.routeT += (v.direction * v.speed * dt * 0.55) / routeLength;
+    if (v.routeT < 0) v.routeT += 1;
+    if (v.routeT > 1) v.routeT -= 1;
 
-    if (v.x < -40) v.x = WORLD.width + 40;
-    if (v.x > WORLD.width + 40) v.x = -40;
-    if (v.y < -40) v.y = WORLD.height + 40;
-    if (v.y > WORLD.height + 40) v.y = -40;
+    const p = sampleRoute(v.routeT);
+    const maxLane = maxLaneOffsetForRouteT(v.routeT, 3);
+    v.laneOffset = Math.max(-maxLane, Math.min(maxLane, v.laneOffset));
+    const next = { x: p.x + p.normal.x * v.laneOffset, y: p.y + p.normal.y * v.laneOffset };
+    const water = clampPointToWater(next, { x: v.x, y: v.y }, 140);
+    v.x = water.x;
+    v.y = water.y;
+    v.heading = v.direction === 1 ? p.tangent : { x: -p.tangent.x, y: -p.tangent.y };
   }
 }
 
@@ -755,11 +932,13 @@ function updateEscorts(dt) {
     }
 
     const c = clampToCorridor({ x: e.x, y: e.y }, 5);
+    const cw = clampPointToWater(c, prev, 180);
     const distFromSafe = nearestOnRoute({ x: e.x, y: e.y }).dist;
-    e.x = c.x;
-    e.y = c.y;
+    e.x = cw.x;
+    e.y = cw.y;
 
-    if (distFromSafe > corridorHalfWidth * 0.9) {
+    const localWidth = corridorHalfWidthAtT(nearestOnRoute({ x: e.x, y: e.y }).routeT);
+    if (distFromSafe > localWidth * 0.9) {
       e.hp = Math.max(20, e.hp - navRules.groundingPenalty * dt);
     }
     const vx = e.x - prev.x;
@@ -787,8 +966,10 @@ function applyTankerSeparation() {
       const d = Math.hypot(a.x - b.x, a.y - b.y);
       if (d < navRules.tankerSeparation) {
         const steer = (navRules.tankerSeparation - d) * 0.35;
-        a.targetLaneOffset = Math.max(-navRules.tankerLaneAbsMax, Math.min(navRules.tankerLaneAbsMax, a.targetLaneOffset - steer));
-        b.targetLaneOffset = Math.max(-navRules.tankerLaneAbsMax, Math.min(navRules.tankerLaneAbsMax, b.targetLaneOffset + steer));
+        const maxA = maxLaneOffsetForRouteT(a.routeT, 4);
+        const maxB = maxLaneOffsetForRouteT(b.routeT, 4);
+        a.targetLaneOffset = Math.max(-maxA, Math.min(maxA, a.targetLaneOffset - steer));
+        b.targetLaneOffset = Math.max(-maxB, Math.min(maxB, b.targetLaneOffset + steer));
         a.speed *= 0.985;
         b.speed *= 0.985;
       }
@@ -817,7 +998,8 @@ function checkCollisionsAndGrounding(dt) {
 
   for (const s of active) {
     const n = nearestOnRoute({ x: s.x, y: s.y });
-    if (n.dist > corridorHalfWidth + 3) {
+    const localWidth = corridorHalfWidthAtT(n.routeT);
+    if (n.dist > localWidth + 3) {
       if (s.kind === "tanker") {
         s.hp -= navRules.groundingPenalty * dt;
         if (!s.burning && Math.random() < 0.03) {
@@ -846,11 +1028,16 @@ function updateTankers(dt) {
       }
     }
 
-    t.targetLaneOffset = Math.max(-navRules.tankerLaneAbsMax, Math.min(navRules.tankerLaneAbsMax, t.targetLaneOffset));
+    const laneMax = maxLaneOffsetForRouteT(t.routeT, 4);
+    t.targetLaneOffset = clamp(t.targetLaneOffset, -laneMax, laneMax);
     t.laneOffset += (t.targetLaneOffset - t.laneOffset) * dt * 2;
     const moveBoost = t.boostTimer > 0 ? 1.34 : 1;
     t.boostTimer = Math.max(0, t.boostTimer - dt);
     t.routeT += (t.direction * t.speed * moveBoost * 1.15 * dt) / routeLength;
+
+    // Corridor can narrow quickly through the Strait, so re-clamp after route advancement.
+    const laneMaxNow = maxLaneOffsetForRouteT(t.routeT, 4);
+    t.laneOffset = clamp(t.laneOffset, -laneMaxNow, laneMaxNow);
 
     if (t.burning) {
       t.burn += dt * 0.38;
@@ -877,6 +1064,23 @@ function updateTankers(dt) {
     const p = sampleRoute(t.routeT);
     t.x = p.x + p.normal.x * t.laneOffset;
     t.y = p.y + p.normal.y * t.laneOffset;
+
+    // Final safety snap: guarantees tankers stay inside navigable water corridor.
+    const n = nearestOnRoute({ x: t.x, y: t.y });
+    const laneMaxSafe = maxLaneOffsetForRouteT(n.routeT, 4);
+    const safeOffset = clamp(n.signedOffset, -laneMaxSafe, laneMaxSafe);
+    t.routeT = n.routeT;
+    t.laneOffset = safeOffset;
+    t.x = n.x + n.normal.x * safeOffset;
+    t.y = n.y + n.normal.y * safeOffset;
+
+    const waterLocked = clampPointToWater({ x: t.x, y: t.y }, { x: prevX, y: prevY }, 220);
+    t.x = waterLocked.x;
+    t.y = waterLocked.y;
+    const nw = nearestOnRoute({ x: t.x, y: t.y });
+    t.routeT = nw.routeT;
+    t.laneOffset = clamp(nw.signedOffset, -maxLaneOffsetForRouteT(nw.routeT, 4), maxLaneOffsetForRouteT(nw.routeT, 4));
+
     const desiredHeading = t.direction === 1 ? { ...p.tangent } : { x: -p.tangent.x, y: -p.tangent.y };
     t.heading = smoothHeading(t.heading, desiredHeading, t.turnRate, dt);
     const moved = Math.hypot(t.x - prevX, t.y - prevY);
@@ -1076,18 +1280,29 @@ function draw() {
   ctx.translate(-state.camera.x, -state.camera.y);
 
   drawMapTiles();
-  drawSeaCorridor();
-  drawTollGates();
-  drawAlliedPickups();
-  drawAmbientTraffic();
+  drawSeaCorridorDebugOverlay();
+
+  if (DEBUG_MAP_ONLY) {
+    drawDiagnosticBanner();
+    ctx.restore();
+    return;
+  }
+
+  if (!DEBUG_CORRIDOR_ONLY) {
+    drawTollGates();
+    drawAlliedPickups();
+    drawAmbientTraffic();
+  }
 
   for (const s of state.ships) {
     if (s.kind === "tanker" && s.sunk) continue;
     if (s.kind === "escort") drawEscort(s);
     if (s.kind === "tanker") drawTanker(s);
   }
-  for (const t of state.threats) drawThreat(t);
-  for (const p of state.projectiles) drawProjectile(p);
+  if (!DEBUG_CORRIDOR_ONLY) {
+    for (const t of state.threats) drawThreat(t);
+    for (const p of state.projectiles) drawProjectile(p);
+  }
   drawLabels();
 
   ctx.restore();
@@ -1145,14 +1360,28 @@ function drawMapTiles() {
 }
 
 function drawSeaCorridor() {
+  // Visual corridor overlay disabled (too noisy over map imagery).
+  // Navigation still uses the same corridor rules in gameplay logic.
+  return;
+
+  // Render a tapered navigable channel so visuals match routing constraints.
+  // We draw many short segments with local width sampled from routeT.
   ctx.strokeStyle = "rgba(75, 170, 255, 0.30)";
-  ctx.lineWidth = corridorHalfWidth * 2;
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
-  ctx.beginPath();
-  ctx.moveTo(routePoints[0].x, routePoints[0].y);
-  for (let i = 1; i < routePoints.length; i++) ctx.lineTo(routePoints[i].x, routePoints[i].y);
-  ctx.stroke();
+  const segments = 56;
+  let prev = sampleRoute(0);
+  for (let i = 1; i <= segments; i++) {
+    const t = i / segments;
+    const curr = sampleRoute(t);
+    const tm = (i - 0.5) / segments;
+    ctx.lineWidth = corridorHalfWidthAtT(tm) * 2;
+    ctx.beginPath();
+    ctx.moveTo(prev.x, prev.y);
+    ctx.lineTo(curr.x, curr.y);
+    ctx.stroke();
+    prev = curr;
+  }
 
   ctx.strokeStyle = "rgba(220,245,255,0.72)";
   ctx.lineWidth = 2;
@@ -1162,13 +1391,6 @@ function drawSeaCorridor() {
   for (let i = 1; i < routePoints.length; i++) ctx.lineTo(routePoints[i].x, routePoints[i].y);
   ctx.stroke();
   ctx.setLineDash([]);
-
-  ctx.fillStyle = "rgba(255, 95, 95, 0.1)";
-  for (const p of routePoints) {
-    ctx.beginPath();
-    ctx.arc(p.x, p.y - 130, corridorHalfWidth + 95, 0, Math.PI * 2);
-    ctx.fill();
-  }
 
   // visual anchor queues (stranded tanker groups)
   ctx.strokeStyle = "rgba(255, 168, 80, 0.75)";
@@ -1181,6 +1403,50 @@ function drawSeaCorridor() {
   ctx.arc(anchorEast.x, anchorEast.y, ANCHOR_ZONES.east.radius, 0, Math.PI * 2);
   ctx.stroke();
   ctx.setLineDash([]);
+}
+
+function drawSeaCorridorDebugOverlay() {
+  ctx.strokeStyle = "rgba(48, 178, 255, 0.62)";
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  const segments = 80;
+  let prev = sampleRoute(0);
+  for (let i = 1; i <= segments; i++) {
+    const t = i / segments;
+    const curr = sampleRoute(t);
+    const tm = (i - 0.5) / segments;
+    ctx.lineWidth = corridorHalfWidthAtT(tm) * 2;
+    ctx.beginPath();
+    ctx.moveTo(prev.x, prev.y);
+    ctx.lineTo(curr.x, curr.y);
+    ctx.stroke();
+    prev = curr;
+  }
+
+  ctx.strokeStyle = "rgba(230, 248, 255, 0.95)";
+  ctx.lineWidth = 2.2;
+  ctx.setLineDash([14, 10]);
+  ctx.beginPath();
+  ctx.moveTo(routePoints[0].x, routePoints[0].y);
+  for (let i = 1; i < routePoints.length; i++) ctx.lineTo(routePoints[i].x, routePoints[i].y);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  if (DEBUG_CORRIDOR_ONLY) {
+    ctx.fillStyle = "rgba(6, 14, 26, 0.70)";
+    ctx.fillRect(state.camera.x + 12, state.camera.y + 66, 450, 26);
+    ctx.fillStyle = "#cfefff";
+    ctx.font = "13px Segoe UI";
+    ctx.fillText("Corridor Debug View: Ships are restricted to the highlighted blue channel", state.camera.x + 20, state.camera.y + 84);
+  }
+}
+
+function drawDiagnosticBanner() {
+  ctx.fillStyle = "rgba(10, 20, 32, 0.84)";
+  ctx.fillRect(state.camera.x + 12, state.camera.y + 66, 620, 34);
+  ctx.fillStyle = "#bfe8ff";
+  ctx.font = "bold 15px Segoe UI";
+  ctx.fillText("MAP-ONLY DIAGNOSTIC: only map tiles and highlighted corridor are rendered", state.camera.x + 20, state.camera.y + 89);
 }
 
 function drawTollGates() {
@@ -1410,10 +1676,44 @@ function drawShipSprite(x, y, heading, spec) {
 }
 
 function drawThreat(t) {
-  ctx.fillStyle = t.kind === "missile" ? "#ff7b66" : "#ffdf68";
-  ctx.beginPath();
-  ctx.arc(t.x, t.y, t.radius, 0, Math.PI * 2);
-  ctx.fill();
+  const aim = t.target ? Math.atan2(t.target.y - t.y, t.target.x - t.x) : 0;
+  ctx.save();
+  ctx.translate(t.x, t.y);
+  ctx.rotate(aim);
+
+  if (t.kind === "missile") {
+    ctx.fillStyle = "#ffb089";
+    ctx.strokeStyle = "rgba(60, 35, 30, 0.9)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(t.radius + 2.4, 0);
+    ctx.lineTo(-t.radius - 2.2, -t.radius * 0.75);
+    ctx.lineTo(-t.radius * 0.95, 0);
+    ctx.lineTo(-t.radius - 2.2, t.radius * 0.75);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle = "rgba(255, 220, 120, 0.9)";
+    ctx.beginPath();
+    ctx.arc(-t.radius - 1.6, 0, 1.4, 0, Math.PI * 2);
+    ctx.fill();
+  } else {
+    const r = t.radius + 0.8;
+    ctx.fillStyle = "#ffe083";
+    ctx.strokeStyle = "rgba(65, 58, 24, 0.9)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0, -r);
+    ctx.lineTo(r, 0);
+    ctx.lineTo(0, r);
+    ctx.lineTo(-r, 0);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+  }
+
+  ctx.restore();
 }
 
 function drawProjectile(p) {
@@ -1426,13 +1726,18 @@ function drawProjectile(p) {
 function drawLabels() {
   const west = sampleRoute(0.02);
   const east = sampleRoute(0.98);
+  // Move location labels inland so they don't obscure the shipping waterway.
+  const westLabelX = west.x - 148;
+  const westLabelY = west.y - 128;
+  const eastLabelX = east.x - 62;
+  const eastLabelY = east.y - 154;
   ctx.fillStyle = "rgba(10,20,32,0.62)";
-  ctx.fillRect(west.x - 108, west.y - 74, 216, 24);
-  ctx.fillRect(east.x - 102, east.y - 74, 204, 24);
+  ctx.fillRect(westLabelX, westLabelY, 216, 24);
+  ctx.fillRect(eastLabelX, eastLabelY, 204, 24);
   ctx.fillStyle = "#eaf2ff";
   ctx.font = "14px Segoe UI";
-  ctx.fillText("Kharg / Gulf queue", west.x - 88, west.y - 57);
-  ctx.fillText("Arabian Sea exit", east.x - 78, east.y - 57);
+  ctx.fillText("Kharg / Gulf queue", westLabelX + 20, westLabelY + 17);
+  ctx.fillText("Arabian Sea exit", eastLabelX + 24, eastLabelY + 17);
 
   const selected = state.escorts[state.selectedEscort];
   if (selected) {
