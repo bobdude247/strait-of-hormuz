@@ -1955,43 +1955,40 @@ function drawShipSprite(x, y, heading, spec) {
     }
 
     if (style === "tankerEmoji") {
-      // red lower hull stripe
-      ctx.fillStyle = "rgba(235, 36, 28, 0.95)";
-      ctx.fillRect(stern * 0.95, beam * 0.12, Math.abs(stern) * 1.65, beam * 0.34);
+      // Satellite-like tanker deck tones (rust/orange body with lighter topside details)
+      ctx.fillStyle = "rgba(198, 104, 88, 0.82)";
+      ctx.fillRect(stern * 0.94, -beam * 0.56, Math.abs(stern) * 1.72, beam * 1.12);
 
-      // main superstructure (white block near stern)
-      ctx.fillStyle = "rgba(238, 243, 249, 0.98)";
-      ctx.fillRect(stern * 0.70, -beam * 0.58, scale * 0.88, beam * 0.90);
-      ctx.fillRect(stern * 0.52, -beam * 0.42, scale * 0.38, beam * 0.60);
+      // Main centerline manifold / pipe run
+      ctx.fillStyle = "rgba(232, 184, 168, 0.86)";
+      ctx.fillRect(stern * 0.84, -beam * 0.09, Math.abs(stern) * 1.48, beam * 0.18);
 
-      // bridge windows
-      ctx.fillStyle = "rgba(20, 132, 208, 0.9)";
-      for (let i = 0; i < 3; i++) {
-        ctx.fillRect(stern * 0.60 + i * scale * 0.17, -beam * 0.24, scale * 0.1, beam * 0.18);
+      // Repeating cargo deck lanes / hatches
+      ctx.fillStyle = "rgba(160, 78, 67, 0.66)";
+      for (let i = 0; i < 8; i++) {
+        const x0 = stern * 0.78 + i * scale * 0.30;
+        ctx.fillRect(x0, -beam * 0.40, scale * 0.16, beam * 0.80);
       }
 
-      // funnel + blue band
-      ctx.fillStyle = "rgba(230, 236, 244, 0.96)";
-      ctx.fillRect(stern * 0.92, -beam * 0.92, scale * 0.34, beam * 0.48);
-      ctx.fillStyle = "rgba(24, 160, 230, 0.92)";
-      ctx.fillRect(stern * 0.92, -beam * 0.78, scale * 0.34, beam * 0.1);
+      ctx.fillStyle = "rgba(236, 170, 152, 0.62)";
+      for (let i = 0; i < 5; i++) {
+        const x1 = stern * 0.70 + i * scale * 0.50;
+        ctx.fillRect(x1, -beam * 0.48, scale * 0.06, beam * 0.96);
+      }
 
-      // deck piping
-      ctx.fillStyle = "rgba(190, 201, 214, 0.78)";
-      ctx.fillRect(stern * 0.34, -beam * 0.16, scale * 1.12, beam * 0.12);
-      ctx.fillRect(stern * 0.08, -beam * 0.24, scale * 0.72, beam * 0.09);
+      // Aft white accommodation block (stern superstructure)
+      ctx.fillStyle = "rgba(236, 241, 246, 0.96)";
+      ctx.fillRect(stern * 0.78, -beam * 0.62, scale * 0.72, beam * 1.00);
+      ctx.fillRect(stern * 0.58, -beam * 0.44, scale * 0.30, beam * 0.66);
 
-      // oil drop badge
-      ctx.fillStyle = "rgba(255, 205, 24, 0.98)";
-      const dropX = stern * 0.06;
-      const dropY = -beam * 0.02;
-      const dropR = scale * 0.16;
+      // Bridge windows strip
+      ctx.fillStyle = "rgba(58, 116, 156, 0.80)";
+      ctx.fillRect(stern * 0.64, -beam * 0.28, scale * 0.38, beam * 0.14);
+
+      // Forward bow highlight cap
+      ctx.fillStyle = "rgba(240, 245, 250, 0.84)";
       ctx.beginPath();
-      ctx.moveTo(dropX, dropY - dropR * 1.25);
-      ctx.quadraticCurveTo(dropX + dropR * 0.85, dropY - dropR * 0.25, dropX + dropR * 0.55, dropY + dropR * 0.52);
-      ctx.quadraticCurveTo(dropX, dropY + dropR * 1.05, dropX - dropR * 0.55, dropY + dropR * 0.52);
-      ctx.quadraticCurveTo(dropX - dropR * 0.85, dropY - dropR * 0.25, dropX, dropY - dropR * 1.25);
-      ctx.closePath();
+      ctx.ellipse(scale * 0.62, 0, scale * 0.20, beam * 0.78, 0, 0, Math.PI * 2);
       ctx.fill();
     }
   } else {
