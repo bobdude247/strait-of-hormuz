@@ -10,8 +10,8 @@ const hud = {
   status: document.getElementById("status")
 };
 
-// Expanded theater: includes northern Gulf approaches (Kharg area) + southern exits
-const MAP_BOUNDS = { minLon: 49.6, maxLon: 59.2, minLat: 23.6, maxLat: 30.1 };
+// Expanded theater: includes northern Gulf approaches (Kharg area) + farther SE/east exits
+const MAP_BOUNDS = { minLon: 49.6, maxLon: 62.0, minLat: 22.0, maxLat: 30.1 };
 const TILE_Z = 7;
 const TILE_SIZE = 256;
 const DEBUG_MAP_ONLY = false;
@@ -740,9 +740,14 @@ function spawnTanker(direction = Math.random() < 0.5 ? 1 : -1) {
     laneOffset,
     targetLaneOffset: laneOffset,
     speed: full ? shipClass.speed * 0.92 : shipClass.speed * 1.08,
+    cruiseSpeed: full ? shipClass.speed * 0.92 : shipClass.speed * 1.08,
     turnRate: shipClass.turnRate,
     speedNow: 0,
     boostTimer: 0,
+    stuckTimer: 0,
+    recoveryTimer: 0,
+    laneBias: Math.random() < 0.5 ? -1 : 1,
+    prevRouteT: t0,
     heading: { ...moorHeading },
     moorHeading,
     hp: shipClass.hp,
@@ -1107,10 +1112,24 @@ function applyTankerSeparation() {
         const steer = (navRules.tankerSeparation - d) * 0.35;
         const maxA = maxLaneOffsetForRouteT(a.routeT, 4);
         const maxB = maxLaneOffsetForRouteT(b.routeT, 4);
-        a.targetLaneOffset = Math.max(-maxA, Math.min(maxA, a.targetLaneOffset - steer));
-        b.targetLaneOffset = Math.max(-maxB, Math.min(maxB, b.targetLaneOffset + steer));
-        a.speed *= 0.985;
-        b.speed *= 0.985;
+
+        if (a.direction === b.direction) {
+          const aLeads = a.direction === 1 ? a.routeT >= b.routeT : a.routeT <= b.routeT;
+          const lead = aLeads ? a : b;
+          const lag = aLeads ? b : a;
+          const lagMax = maxLaneOffsetForRouteT(lag.routeT, 4);
+          const leadMax = maxLaneOffsetForRouteT(lead.routeT, 4);
+
+          lag.targetLaneOffset = clamp(lag.targetLaneOffset + lag.laneBias * steer * 1.35, -lagMax, lagMax);
+          lead.targetLaneOffset = clamp(lead.targetLaneOffset - lag.laneBias * steer * 0.45, -leadMax, leadMax);
+          lag.boostTimer = Math.max(lag.boostTimer, 0.8);
+          lead.speed = Math.max((lead.cruiseSpeed || lead.speed) * 0.78, lead.speed * 0.985);
+        } else {
+          a.targetLaneOffset = clamp(a.targetLaneOffset - steer, -maxA, maxA);
+          b.targetLaneOffset = clamp(b.targetLaneOffset + steer, -maxB, maxB);
+          a.speed = Math.max((a.cruiseSpeed || a.speed) * 0.75, a.speed * 0.98);
+          b.speed = Math.max((b.cruiseSpeed || b.speed) * 0.75, b.speed * 0.98);
+        }
       }
     }
   }
@@ -1164,6 +1183,9 @@ function updateTankers(dt) {
         continue;
       }
     }
+
+    const cruise = t.cruiseSpeed || t.speed;
+    t.speed += (cruise - t.speed) * dt * 0.9;
 
     const laneMax = maxLaneOffsetForRouteT(t.routeT, 4);
     t.targetLaneOffset = clamp(t.targetLaneOffset, -laneMax, laneMax);
@@ -1224,6 +1246,32 @@ function updateTankers(dt) {
     t.heading = smoothHeading(t.heading, desiredHeading, t.turnRate, dt);
     const moved = Math.hypot(t.x - prevX, t.y - prevY);
     t.speedNow = moved / Math.max(0.0001, dt);
+
+    const prevRouteT = t.prevRouteT ?? t.routeT;
+    const forwardProgress = (t.routeT - prevRouteT) * t.direction;
+    t.prevRouteT = t.routeT;
+
+    const lowProgress = forwardProgress < 0.00012;
+    const lowMotion = t.speedNow < Math.max(8, cruise * 0.22);
+    if (lowProgress && lowMotion) t.stuckTimer += dt;
+    else t.stuckTimer = Math.max(0, t.stuckTimer - dt * 1.7);
+
+    if (t.stuckTimer > 2.2) {
+      const rescueStep = (8 + t.radius * 0.9) * (Math.random() < 0.5 ? -1 : 1) * (t.laneBias || 1);
+      const laneMaxRescue = maxLaneOffsetForRouteT(t.routeT, 4);
+      t.targetLaneOffset = clamp(t.targetLaneOffset + rescueStep, -laneMaxRescue, laneMaxRescue);
+      t.boostTimer = Math.max(t.boostTimer, 2.0);
+      t.recoveryTimer = Math.max(t.recoveryTimer, 3.0);
+      t.stuckTimer = 0.7;
+      state.message = "Status: Auto-nav recovery active";
+      state.messageTimer = 0.8;
+    }
+
+    if (t.recoveryTimer > 0) {
+      t.recoveryTimer = Math.max(0, t.recoveryTimer - dt);
+      const recoverCruise = cruise * 1.16;
+      t.speed += (recoverCruise - t.speed) * dt * 1.15;
+    }
   }
 
   applyTankerSeparation();
