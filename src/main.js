@@ -1456,38 +1456,15 @@ function drawSeaCorridor() {
 }
 
 function drawSeaCorridorDebugOverlay() {
-  ctx.strokeStyle = "rgba(48, 178, 255, 0.62)";
-  ctx.lineCap = "round";
-  ctx.lineJoin = "round";
-  const segments = 80;
-  let prev = sampleRoute(0);
-  for (let i = 1; i <= segments; i++) {
-    const t = i / segments;
-    const curr = sampleRoute(t);
-    const tm = (i - 0.5) / segments;
-    ctx.lineWidth = corridorHalfWidthAtT(tm) * 2;
-    ctx.beginPath();
-    ctx.moveTo(prev.x, prev.y);
-    ctx.lineTo(curr.x, curr.y);
-    ctx.stroke();
-    prev = curr;
-  }
-
-  ctx.strokeStyle = "rgba(230, 248, 255, 0.95)";
-  ctx.lineWidth = 2.2;
-  ctx.setLineDash([14, 10]);
-  ctx.beginPath();
-  ctx.moveTo(routePoints[0].x, routePoints[0].y);
-  for (let i = 1; i < routePoints.length; i++) ctx.lineTo(routePoints[i].x, routePoints[i].y);
-  ctx.stroke();
-  ctx.setLineDash([]);
+  // Route overlay intentionally disabled during map-only diagnostics.
+  // This prevents showing an incorrect dark-blue band while route geometry is being tuned.
 
   if (DEBUG_CORRIDOR_ONLY) {
     ctx.fillStyle = "rgba(6, 14, 26, 0.70)";
     ctx.fillRect(state.camera.x + 12, state.camera.y + 66, 450, 26);
     ctx.fillStyle = "#cfefff";
     ctx.font = "13px Segoe UI";
-    ctx.fillText("Corridor Debug View: Blue band = route corridor", state.camera.x + 20, state.camera.y + 84);
+    ctx.fillText("Corridor Debug View: route overlay hidden for retuning", state.camera.x + 20, state.camera.y + 84);
   }
 }
 
