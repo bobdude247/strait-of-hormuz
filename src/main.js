@@ -373,7 +373,9 @@ const anchorWest = lonLatToWorld(ANCHOR_ZONES.west.lon, ANCHOR_ZONES.west.lat);
 const anchorEast = lonLatToWorld(ANCHOR_ZONES.east.lon, ANCHOR_ZONES.east.lat);
 // Shift exit to the lower-right map edge so successful eastbound traffic leaves screen there.
 const EAST_EXIT_LONLAT = { lon: 61.95, lat: 22.2 };
+const WEST_DOCK_LONLAT = { lon: 49.55, lat: 29.0 };
 const eastExitPoint = lonLatToWorld(EAST_EXIT_LONLAT.lon, EAST_EXIT_LONLAT.lat);
+const westDockPoint = lonLatToWorld(WEST_DOCK_LONLAT.lon, WEST_DOCK_LONLAT.lat);
 
 function corridorHalfWidthAtT(routeT) {
   const t = Math.max(0, Math.min(1, routeT));
@@ -400,6 +402,16 @@ function hasReachedDeliveryExit(tanker) {
   const offEast = tanker.x > WORLD.width + 30;
   const offBottomRight = tanker.x > WORLD.width - 70 && tanker.y > WORLD.height - 70;
   return tanker.direction === 1 && (nearEastExit || offEast || offBottomRight);
+}
+
+function hasReachedWestDeliveryDock(tanker) {
+  if (tanker.direction !== -1) return false;
+  const dx = tanker.x - westDockPoint.x;
+  const dy = tanker.y - westDockPoint.y;
+  const nearDock = Math.hypot(dx, dy) <= 120;
+  const deepIntoWestApproach = tanker.routeT < 0.15 && tanker.x <= westDockPoint.x + 85;
+  const offWest = tanker.x < -24;
+  return nearDock || deepIntoWestApproach || offWest;
 }
 
 function clampToCorridor(point, margin = 6) {
@@ -1375,7 +1387,7 @@ function updateTankers(dt) {
     }
 
     const exitedEast = hasReachedDeliveryExit(t);
-    const exitedWest = t.direction === -1 && t.x < -24;
+    const exitedWest = hasReachedWestDeliveryDock(t);
     const eastFailSafe = t.direction === 1 && t.routeT > 1.35;
     if (exitedEast || exitedWest || eastFailSafe || (t.direction === -1 && t.routeT < -0.08)) {
       t.sunk = true;
