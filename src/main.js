@@ -182,6 +182,7 @@ const trunkRouteLonLat = [
   [59.55, 24.68]
 ];
 const fallbackRoutePoints = trunkRouteLonLat.map(([lon, lat]) => lonLatToWorld(lon, lat));
+let routeSource = "polygon";
 
 function buildPolygonCenterlineRoute(polygon, samples = 44) {
   if (!polygon || polygon.length < 4) return [];
@@ -265,8 +266,12 @@ function buildPolygonCenterlineRoute(polygon, samples = 44) {
   return compact;
 }
 
-let routePoints = buildPolygonCenterlineRoute(navigablePolygonWorld, 44);
-if (routePoints.length < 8) routePoints = fallbackRoutePoints;
+let routePoints = buildPolygonCenterlineRoute(navigablePolygonWorld, 120);
+if (routePoints.length < 8) routePoints = buildPolygonCenterlineRoute(navigablePolygonWorld, 220);
+if (routePoints.length < 8) {
+  routePoints = fallbackRoutePoints;
+  routeSource = "legacy-fallback";
+}
 
 let routeSegments = [];
 let routeLength = 0;
@@ -362,7 +367,8 @@ const ANCHOR_ZONES = {
 
 const anchorWest = lonLatToWorld(ANCHOR_ZONES.west.lon, ANCHOR_ZONES.west.lat);
 const anchorEast = lonLatToWorld(ANCHOR_ZONES.east.lon, ANCHOR_ZONES.east.lat);
-const EAST_EXIT_LONLAT = { lon: 61.7, lat: 24.15 };
+// Shift exit to the lower-right map edge so successful eastbound traffic leaves screen there.
+const EAST_EXIT_LONLAT = { lon: 61.95, lat: 22.2 };
 const eastExitPoint = lonLatToWorld(EAST_EXIT_LONLAT.lon, EAST_EXIT_LONLAT.lat);
 
 function corridorHalfWidthAtT(routeT) {
@@ -388,8 +394,7 @@ function hasReachedDeliveryExit(tanker) {
   const dy = tanker.y - eastExitPoint.y;
   const nearEastExit = Math.hypot(dx, dy) <= 70;
   const offEast = tanker.x > WORLD.width + 30;
-  const deepEast = tanker.routeT > 0.985;
-  return tanker.direction === 1 && (nearEastExit || offEast || deepEast);
+  return tanker.direction === 1 && (nearEastExit || offEast);
 }
 
 function clampToCorridor(point, margin = 6) {
@@ -1135,7 +1140,7 @@ function update(dt) {
   hud.missileHits.textContent = `Missile Hits: ${state.metrics.missileHits}`;
   const baseStatus = DEBUG_CORRIDOR_ONLY
     ? "Status: Corridor debug mode (traffic/attacks disabled)"
-    : `Status: Running (Shield ${state.alliedShieldCharges}, Traffic ${state.liveTrafficSource.toUpperCase()}:${state.ambientTraffic.length})`;
+    : `Status: Running (Shield ${state.alliedShieldCharges}, Traffic ${state.liveTrafficSource.toUpperCase()}:${state.ambientTraffic.length}, Route ${routeSource})`;
   hud.status.textContent = state.messageTimer > 0 ? state.message : baseStatus;
 }
 
