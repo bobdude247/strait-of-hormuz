@@ -1770,12 +1770,14 @@ function drawSeaCorridorDebugOverlay() {
     drawNavigablePolygonOverlay();
   }
 
-  if (state.ui.showPolygonOverlay) {
-    // Unmistakable proof overlay is active.
-    ctx.fillStyle = "rgba(255, 0, 200, 0.9)";
-    ctx.font = "bold 14px Segoe UI";
-    ctx.fillText(`POLYGON ON (${navigablePolygonWorld.length} pts)`, state.camera.x + 20, state.camera.y + 112);
-  }
+  // Always show polygon state so ON/OFF is explicit during testing.
+  ctx.fillStyle = state.ui.showPolygonOverlay ? "rgba(255, 0, 200, 0.95)" : "rgba(180, 190, 210, 0.9)";
+  ctx.font = "bold 14px Segoe UI";
+  ctx.fillText(
+    `POLYGON ${state.ui.showPolygonOverlay ? "ON" : "OFF"} (${navigablePolygonWorld.length} pts) · Press B`,
+    state.camera.x + 20,
+    state.camera.y + 112
+  );
 
   // Route overlay intentionally disabled during map-only diagnostics.
   // This prevents showing an incorrect dark-blue band while route geometry is being tuned.
@@ -1792,7 +1794,7 @@ function drawSeaCorridorDebugOverlay() {
 function drawNavigablePolygonOverlay() {
   if (!navigablePolygonWorld.length) return;
   ctx.save();
-  ctx.globalCompositeOperation = "source-over";
+  ctx.globalCompositeOperation = "screen";
   ctx.beginPath();
   ctx.moveTo(navigablePolygonWorld[0].x, navigablePolygonWorld[0].y);
   for (let i = 1; i < navigablePolygonWorld.length; i++) {
@@ -1800,19 +1802,19 @@ function drawNavigablePolygonOverlay() {
   }
   ctx.closePath();
 
-  ctx.fillStyle = "rgba(255, 0, 200, 0.18)";
+  ctx.fillStyle = "rgba(255, 0, 220, 0.24)";
   ctx.fill();
-  ctx.strokeStyle = "rgba(255, 80, 220, 1)";
-  ctx.lineWidth = 5;
+  ctx.strokeStyle = "rgba(255, 120, 235, 1)";
+  ctx.lineWidth = 6;
   ctx.setLineDash([14, 8]);
   ctx.stroke();
   ctx.setLineDash([]);
 
   // Vertex markers so polygon is unmistakably visible over water tiles.
-  ctx.fillStyle = "rgba(255, 255, 255, 0.95)";
+  ctx.fillStyle = "rgba(255, 255, 255, 1)";
   for (const p of navigablePolygonWorld) {
     ctx.beginPath();
-    ctx.arc(p.x, p.y, 2.5, 0, Math.PI * 2);
+    ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
     ctx.fill();
   }
   ctx.restore();
