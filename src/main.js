@@ -365,6 +365,9 @@ const ANCHOR_ZONES = {
   east: { lon: 57.30, lat: 25.18, radius: 40, entryT: 0.86 }
 };
 
+// Keep hostile launch origins on Iranian-side waters only (never from Pakistan side).
+const IRAN_ATTACK_MAX_LON = 61.6;
+
 const anchorWest = lonLatToWorld(ANCHOR_ZONES.west.lon, ANCHOR_ZONES.west.lat);
 const anchorEast = lonLatToWorld(ANCHOR_ZONES.east.lon, ANCHOR_ZONES.east.lat);
 // Shift exit to the lower-right map edge so successful eastbound traffic leaves screen there.
@@ -881,7 +884,8 @@ function spawnThreat() {
   const center = sampleRoute(target.routeT);
   const xJitter = rng(-220, 220);
   const yNorthOffset = rng(120, 280);
-  const spawnX = center.x + xJitter;
+  const iranAttackMaxX = lonLatToWorld(IRAN_ATTACK_MAX_LON, MAP_BOUNDS.minLat).x;
+  const spawnX = Math.min(center.x + xJitter, iranAttackMaxX);
   const spawnY = Math.max(0, center.y - yNorthOffset);
 
   state.threats.push({
