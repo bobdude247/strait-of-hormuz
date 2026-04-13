@@ -15,7 +15,7 @@ const hud = {
 };
 
 // Expanded theater: includes northern Gulf approaches (Kharg area) + farther SE/east exits
-const MAP_BOUNDS = { minLon: 49.6, maxLon: 62.0, minLat: 22.0, maxLat: 30.1 };
+const MAP_BOUNDS = { minLon: 48.2, maxLon: 70.1, minLat: 20.0, maxLat: 30.3 };
 const TILE_Z = 7;
 const TILE_SIZE = 256;
 const DEBUG_MAP_ONLY = false;
@@ -383,25 +383,25 @@ function maxLaneOffsetForRouteT(routeT, margin = 4) {
 }
 
 function isInEastExitExtension(point) {
-  return point.x > eastExitPoint.x - 120
-    && point.x < WORLD.width + 220
-    && point.y > eastExitPoint.y - 180
-    && point.y < eastExitPoint.y + 240;
+  return point.x > eastExitPoint.x - 220
+    && point.x < WORLD.width + 260
+    && point.y > eastExitPoint.y - 260
+    && point.y < WORLD.height + 260;
 }
 
 function hasReachedDeliveryExit(tanker) {
   const dx = tanker.x - eastExitPoint.x;
   const dy = tanker.y - eastExitPoint.y;
-  const nearEastExit = Math.hypot(dx, dy) <= 70;
+  const nearEastExit = Math.hypot(dx, dy) <= 95;
   const offEast = tanker.x > WORLD.width + 30;
-  return tanker.direction === 1 && (nearEastExit || offEast);
+  const offBottomRight = tanker.x > WORLD.width - 70 && tanker.y > WORLD.height - 70;
+  return tanker.direction === 1 && (nearEastExit || offEast || offBottomRight);
 }
 
 function clampToCorridor(point, margin = 6) {
+  // Escort movement should allow full polygon navigation, not just the legacy route corridor.
   const n = nearestOnRoute(point);
-  const maxOffset = maxLaneOffsetForRouteT(n.routeT, margin);
-  const off = Math.max(-maxOffset, Math.min(maxOffset, n.signedOffset));
-  return { x: n.x + n.normal.x * off, y: n.y + n.normal.y * off };
+  return clampPointToWater(point, { x: n.x, y: n.y }, 420);
 }
 
 function worldToTileSample(worldX, worldY, z = TILE_Z) {
@@ -1366,7 +1366,8 @@ function updateTankers(dt) {
 
     const exitedEast = hasReachedDeliveryExit(t);
     const exitedWest = t.direction === -1 && t.x < -24;
-    if (t.routeT > 1.08 || t.routeT < -0.08 || exitedEast || exitedWest) {
+    const eastFailSafe = t.direction === 1 && t.routeT > 1.35;
+    if (exitedEast || exitedWest || eastFailSafe || (t.direction === -1 && t.routeT < -0.08)) {
       t.sunk = true;
       state.delivered += 1;
       state.score += 45 + t.cargoValue;
@@ -1391,7 +1392,7 @@ function updateTankers(dt) {
     t.x = n.x + n.normal.x * safeOffset;
     t.y = n.y + n.normal.y * safeOffset;
 
-    const waterLocked = clampPointToWater({ x: t.x, y: t.y }, { x: prevX, y: prevY }, 220);
+    const waterLocked = clampPointToWater({ x: t.x, y: t.y }, { x: prevX, y: prevY }, 420);
     t.x = waterLocked.x;
     t.y = waterLocked.y;
     const nw = nearestOnRoute({ x: t.x, y: t.y });
