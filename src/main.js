@@ -20,7 +20,7 @@ const TILE_Z = 7;
 const TILE_SIZE = 256;
 const DEBUG_MAP_ONLY = false;
 const DEBUG_CORRIDOR_ONLY = false;
-const DEFAULT_SHOW_POLYGON_OVERLAY = false;
+const DEFAULT_SHOW_POLYGON_OVERLAY = true;
 const DEFAULT_SHOW_TOLL_GATES = false;
 const DEFAULT_SHOW_LOCATION_LABELS = false;
 
