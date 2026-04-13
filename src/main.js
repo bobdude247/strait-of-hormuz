@@ -655,6 +655,9 @@ function spendUpgrade(type) {
 }
 
 function init() {
+  // Ensure polygon boundary starts visible every session.
+  state.ui.showPolygonOverlay = true;
+
   if (!DEBUG_MAP_ONLY) {
     for (let i = 0; i < 3; i++) spawnEscort(i);
     for (let i = 0; i < 9; i++) spawnTanker(i % 2 === 0 ? 1 : -1);
@@ -915,9 +918,21 @@ function bindInput() {
     }
 
     if (k === "f") useDamageControl();
-    if (k === "b") state.ui.showPolygonOverlay = !state.ui.showPolygonOverlay;
-    if (k === "g") state.ui.showTollGates = !state.ui.showTollGates;
-    if (k === "n") state.ui.showLocationLabels = !state.ui.showLocationLabels;
+    if (k === "b") {
+      state.ui.showPolygonOverlay = !state.ui.showPolygonOverlay;
+      state.message = `Status: Boundary polygon ${state.ui.showPolygonOverlay ? "ON" : "OFF"}`;
+      state.messageTimer = 1.4;
+    }
+    if (k === "g") {
+      state.ui.showTollGates = !state.ui.showTollGates;
+      state.message = `Status: Waypoint dots ${state.ui.showTollGates ? "ON" : "OFF"}`;
+      state.messageTimer = 1.4;
+    }
+    if (k === "n") {
+      state.ui.showLocationLabels = !state.ui.showLocationLabels;
+      state.message = `Status: Location labels ${state.ui.showLocationLabels ? "ON" : "OFF"}`;
+      state.messageTimer = 1.4;
+    }
     if (["1", "2", "3"].includes(e.key)) state.priority = e.key === "1" ? "missile" : e.key === "2" ? "drone" : "any";
     if (e.key === "+" || e.key === "=") state.zoom = Math.min(2.2, state.zoom + 0.1);
     if (e.key === "-") state.zoom = Math.max(0.6, state.zoom - 0.1);
@@ -1785,10 +1800,10 @@ function drawNavigablePolygonOverlay() {
   }
   ctx.closePath();
 
-  ctx.fillStyle = "rgba(255, 0, 200, 0.12)";
+  ctx.fillStyle = "rgba(255, 0, 200, 0.18)";
   ctx.fill();
-  ctx.strokeStyle = "rgba(255, 0, 200, 0.95)";
-  ctx.lineWidth = 4;
+  ctx.strokeStyle = "rgba(255, 80, 220, 1)";
+  ctx.lineWidth = 5;
   ctx.setLineDash([14, 8]);
   ctx.stroke();
   ctx.setLineDash([]);
