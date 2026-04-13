@@ -20,7 +20,7 @@ const TILE_Z = 7;
 const TILE_SIZE = 256;
 const DEBUG_MAP_ONLY = false;
 const DEBUG_CORRIDOR_ONLY = false;
-const DEFAULT_SHOW_POLYGON_OVERLAY = true;
+const DEFAULT_SHOW_POLYGON_OVERLAY = false;
 const DEFAULT_SHOW_TOLL_GATES = false;
 const DEFAULT_SHOW_LOCATION_LABELS = false;
 
@@ -365,8 +365,9 @@ const ANCHOR_ZONES = {
   east: { lon: 57.30, lat: 25.18, radius: 40, entryT: 0.86 }
 };
 
-// Keep hostile launch origins on Iranian-side waters only (never from Pakistan side).
-const IRAN_ATTACK_MAX_LON = 61.6;
+// Keep hostile launch origins on Iranian-side waters only (never from Pakistan/Gujarat side).
+const IRAN_ATTACK_MIN_LON = 50.0;
+const IRAN_ATTACK_MAX_LON = 60.4;
 
 const anchorWest = lonLatToWorld(ANCHOR_ZONES.west.lon, ANCHOR_ZONES.west.lat);
 const anchorEast = lonLatToWorld(ANCHOR_ZONES.east.lon, ANCHOR_ZONES.east.lat);
@@ -663,8 +664,8 @@ function spendUpgrade(type) {
 }
 
 function init() {
-  // Ensure polygon boundary starts visible every session.
-  state.ui.showPolygonOverlay = true;
+  // Start with configured default; can be toggled with B.
+  state.ui.showPolygonOverlay = DEFAULT_SHOW_POLYGON_OVERLAY;
 
   if (!DEBUG_MAP_ONLY) {
     for (let i = 0; i < 3; i++) spawnEscort(i);
@@ -882,10 +883,15 @@ function spawnThreat() {
   const kind = Math.random() < 0.57 ? "drone" : "missile";
 
   const center = sampleRoute(target.routeT);
+  const iranAttackMinX = lonLatToWorld(IRAN_ATTACK_MIN_LON, MAP_BOUNDS.minLat).x;
   const xJitter = rng(-220, 220);
   const yNorthOffset = rng(120, 280);
   const iranAttackMaxX = lonLatToWorld(IRAN_ATTACK_MAX_LON, MAP_BOUNDS.minLat).x;
-  const spawnX = Math.min(center.x + xJitter, iranAttackMaxX);
+
+  // If convoy is far east of Iranian launch reach, skip spawn this cycle.
+  if (center.x > iranAttackMaxX + 520) return;
+
+  const spawnX = clamp(center.x + xJitter, iranAttackMinX, iranAttackMaxX);
   const spawnY = Math.max(0, center.y - yNorthOffset);
 
   state.threats.push({
@@ -1261,14 +1267,14 @@ function applyTankerSeparation() {
           const lagMax = maxLaneOffsetForRouteT(lag.routeT, 4);
           const leadMax = maxLaneOffsetForRouteT(lead.routeT, 4);
 
-          lag.targetLaneOffset = clamp(lag.targetLaneOffset + lag.laneBias * steer * 1.35, -lagMax, lagMax);
-          lead.targetLaneOffset = clamp(lead.targetLaneOffset - lag.laneBias * steer * 0.45, -leadMax, leadMax);
+          lag.targetLaneOffset = clamp(lag.targetLaneOffset + lag.laneBias * steer * 0.82, -lagMax, lagMax);
+          lead.targetLaneOffset = clamp(lead.targetLaneOffset - lag.laneBias * steer * 0.28, -leadMax, leadMax);
           lag.boostTimer = Math.max(lag.boostTimer, 1.4);
           lag.recoveryTimer = Math.max(lag.recoveryTimer || 0, 1.6);
           lead.speed = Math.max((lead.cruiseSpeed || lead.speed) * 0.78, lead.speed * 0.985);
         } else {
-          a.targetLaneOffset = clamp(a.targetLaneOffset - steer, -maxA, maxA);
-          b.targetLaneOffset = clamp(b.targetLaneOffset + steer, -maxB, maxB);
+          a.targetLaneOffset = clamp(a.targetLaneOffset - steer * 0.65, -maxA, maxA);
+          b.targetLaneOffset = clamp(b.targetLaneOffset + steer * 0.65, -maxB, maxB);
           a.speed = Math.max((a.cruiseSpeed || a.speed) * 0.75, a.speed * 0.98);
           b.speed = Math.max((b.cruiseSpeed || b.speed) * 0.75, b.speed * 0.98);
           a.recoveryTimer = Math.max(a.recoveryTimer || 0, 0.8);
@@ -1336,14 +1342,14 @@ function updateTankers(dt) {
 
     if (t.boundaryFollowTimer > 0) {
       const followMax = maxLaneOffsetForRouteT(t.routeT, 4);
-      const boundaryTarget = t.boundarySide * Math.max(0, followMax - 1.5);
-      t.targetLaneOffset += (boundaryTarget - t.targetLaneOffset) * Math.min(1, dt * 3.8);
-      const edgeCruise = cruise * 0.72;
-      t.speed += (edgeCruise - t.speed) * dt * 2.4;
+      const boundaryTarget = t.boundarySide * Math.max(0, followMax - 3.5);
+      t.targetLaneOffset += (boundaryTarget - t.targetLaneOffset) * Math.min(1, dt * 2.3);
+      const edgeCruise = cruise * 0.78;
+      t.speed += (edgeCruise - t.speed) * dt * 1.8;
       t.boundaryFollowTimer = Math.max(0, t.boundaryFollowTimer - dt);
     }
 
-    t.laneOffset += (t.targetLaneOffset - t.laneOffset) * dt * 2;
+    t.laneOffset += (t.targetLaneOffset - t.laneOffset) * dt * 1.15;
     const moveBoost = t.boostTimer > 0 ? 1.34 : 1;
     t.boostTimer = Math.max(0, t.boostTimer - dt);
     t.routeT += (t.direction * t.speed * moveBoost * 1.15 * dt) / routeLength;
@@ -1410,10 +1416,10 @@ function updateTankers(dt) {
 
     const edgeMax = maxLaneOffsetForRouteT(t.routeT, 4);
     const edgeRatio = Math.abs(t.laneOffset) / Math.max(1, edgeMax);
-    if (edgeRatio > 0.93) {
+    if (edgeRatio > 0.88) {
       t.boundarySide = signNonZero(t.laneOffset, t.boundarySide || t.laneBias || t.direction);
-      t.boundaryFollowTimer = Math.max(t.boundaryFollowTimer, 2.2);
-    } else if (edgeRatio < 0.72 && t.boundaryFollowTimer > 0) {
+      t.boundaryFollowTimer = Math.max(t.boundaryFollowTimer, 3.2);
+    } else if (edgeRatio < 0.65 && t.boundaryFollowTimer > 0) {
       t.boundaryFollowTimer = Math.max(0, t.boundaryFollowTimer - dt * 1.4);
     }
 
@@ -1433,7 +1439,7 @@ function updateTankers(dt) {
     if (t.stuckTimer > 2.2) {
       const laneMaxRescue = maxLaneOffsetForRouteT(t.routeT, 4);
       t.boundarySide = signNonZero(t.laneOffset, t.boundarySide || t.laneBias || t.direction);
-      t.targetLaneOffset = t.boundarySide * Math.max(0, laneMaxRescue - 1.5);
+      t.targetLaneOffset = t.boundarySide * Math.max(0, laneMaxRescue - 5);
       t.boundaryFollowTimer = Math.max(t.boundaryFollowTimer, 4.0);
       const sizeMul = Math.max(1, t.radius / 7.5);
       t.boostTimer = Math.max(t.boostTimer, 1.0 * sizeMul);
